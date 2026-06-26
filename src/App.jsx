@@ -14,7 +14,9 @@ import * as XLSX from "xlsx";
 const AI_CONFIG = {
   provider: "gemini",
   gemini: {
-    apiKey: "YOUR_GEMINI_API_KEY",      // ← 여기에 키 입력 (커밋 금지)
+    // 키는 프로젝트 루트의 .env.local 에 VITE_GEMINI_API_KEY 로 넣습니다(절대 커밋되지 않음).
+    // .env.local 이 없으면 아래 플레이스홀더가 쓰여 '미설정' 상태가 됩니다.
+    apiKey: import.meta.env.VITE_GEMINI_API_KEY || "YOUR_GEMINI_API_KEY",
     model: "gemini-2.5-flash",          // 대안: "gemini-2.0-flash", "gemini-1.5-flash"
   },
 };

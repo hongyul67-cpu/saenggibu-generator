@@ -23,24 +23,24 @@ npm run dev
 
 ### API 키 설정
 
-발급: [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+발급: [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (보통 `AIza...` 로 시작)
 
 키를 적용하는 방법은 두 가지입니다.
 
-1. **코드에 입력** — `src/App.jsx` 상단 `AI_CONFIG.gemini.apiKey` 값에 붙여넣기 (배포용)
+1. **`.env.local` 파일에 입력 (권장 · git에 커밋 안 됨)**
+   ```bash
+   cp .env.example .env.local
+   ```
+   그런 다음 `.env.local` 의 값을 본인 키로 채웁니다.
+   ```env
+   VITE_GEMINI_API_KEY=여기에_본인_키
+   ```
+   `src/App.jsx` 는 이 값을 자동으로 읽습니다(`import.meta.env.VITE_GEMINI_API_KEY`). 값 변경 후엔 `npm run dev` 를 다시 실행하세요.
 2. **화면에서 임시 입력** — 우측 상단 *키 입력* 에 붙여넣기 (이 세션에서만 사용, 새로고침하면 사라짐 / 테스트용)
 
-```js
-const AI_CONFIG = {
-  provider: "gemini",
-  gemini: {
-    apiKey: "여기에_본인_키",      // 커밋 금지
-    model: "gemini-2.5-flash",    // 대안: "gemini-2.0-flash", "gemini-1.5-flash"
-  },
-};
-```
+모델 등 그 밖의 설정은 `src/App.jsx` 상단 `AI_CONFIG` 블록에서 바꿉니다.
 
-> 🔐 **보안 주의:** 이 앱은 브라우저에서 Gemini로 **직접** 요청합니다. 즉 코드에 넣은 키는 배포 시 사용자에게 노출될 수 있습니다. 공개 배포가 필요하면 키를 숨기는 **프록시(서버리스 함수 등)** 사용을 권장합니다. 그리고 **실제 키를 git에 커밋하지 마세요** (`.gitignore`로 `.env` 류는 제외되지만, `App.jsx`에 직접 넣은 키는 커밋됩니다).
+> 🔐 **보안 주의:** `.env.local` 은 `.gitignore` 로 제외되어 키가 저장소에 올라가지 않습니다. 다만 이 앱은 브라우저에서 Gemini로 **직접** 요청하므로, 빌드해서 **배포하면** 키가 번들·네트워크 요청에 포함되어 사용자에게 보일 수 있습니다. 공개 배포가 필요하면 키를 숨기는 **프록시(서버리스 함수 등)** 사용을 권장합니다.
 
 ## 다른 AI로 교체
 

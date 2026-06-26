@@ -139,18 +139,13 @@
       <h3>최초 1회 · API 키 등록 (관리자 설정)</h3>
       <p>이 도구는 구글 <b>Gemini</b>로 문장을 만듭니다. 학교(또는 담당 선생님)가 키를 한 번만 넣어 두면, 이후 사용하는 모든 분은 키 입력 없이 바로 쓸 수 있습니다.</p>
       <ol class="sub">
-        <li>구글 AI Studio 접속 → <code>aistudio.google.com/apikey</code> 에서 <b>API 키 만들기</b></li>
+        <li>구글 AI Studio 접속 → <code>aistudio.google.com/apikey</code> 에서 <b>API 키 만들기</b> (보통 <code>AIza…</code> 로 시작)</li>
         <li>발급된 키를 복사</li>
-        <li>코드 맨 위 설정 블록의 <code>apiKey</code> 값에 붙여넣기</li>
+        <li>프로젝트 폴더의 <code>.env.example</code> 을 <code>.env.local</code> 로 복사한 뒤, 키 값을 붙여넣기</li>
       </ol>
-<pre><span class="c">// 코드 상단 — 이 부분만 수정하면 됩니다</span>
-<span class="k">const</span> AI_CONFIG = {
-  provider: <span class="s">"gemini"</span>,
-  gemini: {
-    apiKey: <span class="s">"여기에_본인_키_붙여넣기"</span>,   <span class="c">// ← 여기</span>
-    model:  <span class="s">"gemini-2.5-flash"</span>,
-  },
-};</pre>
+<pre><span class="c"># .env.local — 이 파일은 git에 올라가지 않습니다(키 비공개 보관)</span>
+VITE_GEMINI_API_KEY=<span class="s">여기에_본인_키_붙여넣기</span></pre>
+      <p style="margin-top:10px;">코드는 이 값을 자동으로 읽습니다. 모델 변경 등은 <code>src/App.jsx</code> 상단 <code>AI_CONFIG</code> 블록에서 합니다.</p>
       <div class="call tip"><span class="t">무료로 충분합니다</span>Gemini Flash 계열은 무료 사용량이 넉넉해, 한 학교에서 한 학급~여러 학급을 처리하는 정도면 대개 비용이 들지 않습니다. 사용량이 매우 많아지면 유료 전환이 필요할 수 있습니다.</div>
       <div class="call warn"><span class="t">키를 코드에 못 넣는 상황이라면</span>화면 우측 상단 <b>키 입력</b>을 누르고 키를 붙여넣으면 그 자리에서 바로 테스트할 수 있습니다. 단, 이 방식은 새로고침하면 사라지므로 정식 배포에는 위 코드 등록 방식을 쓰세요.</div>
     </div>
