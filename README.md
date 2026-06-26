@@ -21,6 +21,18 @@ npm run dev
 
 브라우저에서 안내되는 주소(기본 `http://localhost:5173`)로 접속합니다.
 
+> Windows에서는 `생기부생성기 실행.bat` 을 더블클릭하면 의존성 설치·서버 실행·브라우저 열기까지 자동으로 됩니다.
+
+### 단독 실행 파일 (Node 설치 없이 더블클릭)
+
+```bash
+npm run build:single
+```
+
+`dist-single/index.html` 하나에 모든 코드·CSS가 인라인된 **단일 HTML**이 생성됩니다. 이 파일만 USB나 압축으로 옮겨 어느 컴퓨터에서든 **더블클릭**하면 (Node·Python·서버 없이) 브라우저에서 바로 실행됩니다. Gemini API는 `null` origin(file://)에서도 CORS가 허용되어 정상 호출됩니다.
+
+> ⚠️ **주의:** `.env.local` 에 키가 있는 상태로 빌드하면 그 키가 HTML 안에 **그대로 박힙니다.** 본인 컴퓨터 간 이동에는 편하지만, 이 파일은 **외부 공유·git 커밋 금지**입니다(`.gitignore` 로 제외됨). 다른 사람에게 줄 거면 키 없이(`.env.local` 비우고) 빌드한 뒤 화면 우측 상단 *키 입력* 으로 각자 넣게 하세요.
+
 ### API 키 설정
 
 발급: [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (보통 `AIza...` 로 시작)

@@ -4,6 +4,9 @@ node_modules
 # build output
 dist
 dist-ssr
+dist-single
+# 단일 HTML 빌드 산출물(키가 인라인될 수 있어 커밋 금지)
+*생기부생성기*.html
 
 # local env / secrets — API 키가 절대 커밋되지 않도록
 .env
