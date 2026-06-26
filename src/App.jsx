@@ -17,18 +17,22 @@ const AI_CONFIG = {
     // 키는 프로젝트 루트의 .env.local 에 VITE_GEMINI_API_KEY 로 넣습니다(절대 커밋되지 않음).
     // .env.local 이 없으면 아래 플레이스홀더가 쓰여 '미설정' 상태가 됩니다.
     apiKey: import.meta.env.VITE_GEMINI_API_KEY || "YOUR_GEMINI_API_KEY",
-    model: "gemini-2.5-flash",          // 대안: "gemini-2.0-flash", "gemini-1.5-flash"
+    model: "gemini-2.5-flash",          // 대안: "gemini-2.0-flash"
   },
 };
 
 async function callGemini(prompt, apiKey, model, maxTokens) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const generationConfig = { temperature: 0.7, maxOutputTokens: maxTokens || 1024 };
+  // gemini-2.5 계열은 추론(thinking) 모델이라, 끄지 않으면 사고 과정이 본문에 섞이거나
+  // 토큰을 소진해 빈 응답이 나올 수 있음 → 비활성화. (다른 모델엔 미지원 필드라 조건부 적용)
+  if (/2\.5/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: maxTokens || 1024 },
+      generationConfig,
     }),
   });
   if (!res.ok) {

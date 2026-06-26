@@ -55,7 +55,7 @@ const aiProviders = {
 
 ## 알려진 참고 사항
 
-- `gemini-2.5-flash`는 추론(thinking) 모델이라 `maxOutputTokens`가 작으면 본문이 비어 `"응답이 비어 있습니다"`가 뜰 수 있습니다. 그럴 땐 제한값을 키우거나 모델을 `gemini-2.0-flash`로 바꿔 보세요.
+- `gemini-2.5-flash`는 추론(thinking) 모델이라 사고 과정이 본문에 섞이거나 토큰을 소진해 빈 응답이 날 수 있어, 2.5 계열은 `thinkingConfig.thinkingBudget = 0` 으로 **추론을 끄도록** 처리해 두었습니다(`callGemini`). 그래도 빈 응답이 잦으면 제한값을 키우거나 모델을 `gemini-2.0-flash`로 바꿔 보세요.
 - 무료 사용량의 분당 요청 한도(429)를 넘으면 잠시 후 다시 시도하세요. 전체 생성은 학생 사이에 간격을 둡니다.
 
 ## 사용 가이드북
