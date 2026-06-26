@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>생기부 문장 생성기 · 사용 가이드북</title>
+<style>
+  :root{
+    --ink:#1e1b4b; --indigo:#4f46e5; --indigo-soft:#eef2ff; --indigo-line:#c7d2fe;
+    --slate:#334155; --slate-soft:#64748b; --line:#e2e8f0; --paper:#ffffff; --bg:#f4f4f8;
+    --amber:#b45309; --amber-bg:#fffbeb; --amber-line:#fde68a;
+    --emerald:#047857; --emerald-bg:#ecfdf5; --emerald-line:#a7f3d0;
+    --red:#b91c1c; --red-bg:#fef2f2; --red-line:#fecaca;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--slate);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;
+    line-height:1.75; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:840px; margin:0 auto; padding:32px 20px 80px;}
+  .sheet{background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:40px 44px;}
+
+  /* 헤더 */
+  .eyebrow{font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--indigo); font-weight:700;}
+  h1{font-size:30px; line-height:1.25; color:var(--ink); margin:8px 0 10px; letter-spacing:-.01em;}
+  .lead{font-size:15.5px; color:var(--slate-soft); margin:0;}
+  .toolbar{display:flex; gap:10px; margin-top:18px;}
+  .btn{appearance:none; border:1px solid var(--indigo-line); background:var(--indigo-soft); color:var(--indigo);
+    font:inherit; font-size:13px; font-weight:600; padding:7px 14px; border-radius:9px; cursor:pointer;}
+  .btn:hover{background:#e0e7ff;}
+
+  hr.div{border:none; border-top:1px solid var(--line); margin:30px 0;}
+
+  /* 한눈에 보기 */
+  .quick{background:linear-gradient(180deg,#fafaff,#f5f5ff); border:1px solid var(--indigo-line);
+    border-radius:14px; padding:20px 22px; margin-top:26px;}
+  .quick h2{margin:0 0 12px; font-size:15px; color:var(--ink);}
+  .flow{display:grid; grid-template-columns:repeat(5,1fr); gap:8px;}
+  .flow .node{text-align:center; font-size:12.5px; color:var(--slate); background:#fff;
+    border:1px solid var(--line); border-radius:10px; padding:12px 6px; position:relative;}
+  .flow .node b{display:block; color:var(--ink); font-size:13px; margin-bottom:2px;}
+  .flow .node .n{display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center;
+    background:var(--indigo); color:#fff; border-radius:50%; font-size:11px; font-weight:700; margin-bottom:6px;}
+  @media(max-width:680px){ .flow{grid-template-columns:repeat(2,1fr);} }
+
+  /* 스텝 */
+  .step{display:flex; gap:18px; padding:26px 0; border-top:1px solid var(--line);}
+  .step:first-of-type{border-top:none;}
+  .step .num{flex:0 0 38px; height:38px; border-radius:11px; background:var(--ink); color:#fff;
+    font-weight:700; font-size:16px; display:flex; align-items:center; justify-content:center;}
+  .step.zero .num{background:var(--indigo);}
+  .step .body{flex:1; min-width:0;}
+  .step h3{margin:4px 0 8px; font-size:18px; color:var(--ink); letter-spacing:-.01em;}
+  .step p{margin:0 0 10px;}
+  ol.sub,ul.sub{margin:8px 0 4px; padding-left:20px;}
+  ol.sub li,ul.sub li{margin:5px 0;}
+
+  h2.sec{font-size:20px; color:var(--ink); margin:36px 0 6px; letter-spacing:-.01em;}
+  .sec-desc{margin:0 0 14px; color:var(--slate-soft); font-size:14px;}
+
+  code{background:#f1f5f9; border:1px solid var(--line); border-radius:5px; padding:1px 6px;
+    font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace; font-size:12.5px; color:var(--ink);}
+  pre{background:#0f172a; color:#e2e8f0; border-radius:11px; padding:16px 18px; overflow:auto;
+    font-family:"SFMono-Regular",Consolas,monospace; font-size:12.5px; line-height:1.6;}
+  pre .c{color:#94a3b8;} pre .k{color:#fca5a5;} pre .s{color:#86efac;}
+
+  /* 콜아웃 */
+  .call{border-radius:11px; padding:14px 16px; margin:14px 0; font-size:14px;}
+  .call .t{font-weight:700; display:block; margin-bottom:3px;}
+  .tip{background:var(--emerald-bg); border:1px solid var(--emerald-line);}
+  .tip .t{color:var(--emerald);}
+  .warn{background:var(--amber-bg); border:1px solid var(--amber-line);}
+  .warn .t{color:var(--amber);}
+  .danger{background:var(--red-bg); border:1px solid var(--red-line);}
+  .danger .t{color:var(--red);}
+
+  /* 게이지 칩 */
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;}
+  .chip{display:inline-flex; align-items:center; gap:6px; font-size:13px; padding:4px 10px;
+    border-radius:20px; border:1px solid var(--line); background:#fff;}
+  .dot{width:9px; height:9px; border-radius:50%;}
+  .g{background:#10b981;} .a{background:#f59e0b;} .r{background:#ef4444;}
+
+  /* FAQ */
+  details{border:1px solid var(--line); border-radius:11px; padding:2px 16px; margin:10px 0; background:#fff;}
+  details[open]{background:#fcfcff;}
+  summary{cursor:pointer; font-weight:600; color:var(--ink); padding:12px 0; list-style:none; font-size:14.5px;}
+  summary::-webkit-details-marker{display:none;}
+  summary::before{content:"＋"; color:var(--indigo); font-weight:700; margin-right:8px;}
+  details[open] summary::before{content:"－";}
+  details .ans{padding:0 0 14px; font-size:14px;}
+
+  /* 표 */
+  table{width:100%; border-collapse:collapse; margin:12px 0; font-size:13.5px;}
+  th,td{border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top;}
+  th{background:var(--indigo-soft); color:var(--ink); font-weight:600;}
+
+  footer{margin-top:34px; padding-top:18px; border-top:1px solid var(--line);
+    font-size:12.5px; color:var(--slate-soft); text-align:center;}
+
+  @media print{
+    body{background:#fff;} .wrap{padding:0;} .sheet{border:none; border-radius:0; padding:0;}
+    .toolbar{display:none;} details{break-inside:avoid;} .step{break-inside:avoid;} pre{break-inside:avoid;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="sheet">
+
+  <!-- 헤더 -->
+  <div class="eyebrow">교사용 사용 안내서</div>
+  <h1>생기부 문장 생성기<br/>사용 가이드북</h1>
+  <p class="lead"><b>행동특성 및 종합의견</b>과 <b>세부능력 및 특기사항(세특)</b>을 한 도구에서 작성합니다. 항목을 고르고 메모를 더하면 초안이 만들어지고, 글자수(바이트)를 실시간으로 확인하며, 반 전체를 엑셀로 한 번에 저장합니다.</p>
+  <div class="toolbar">
+    <button class="btn" onclick="window.print()">인쇄 / PDF로 저장</button>
+  </div>
+
+  <!-- 한눈에 보기 -->
+  <div class="quick">
+    <h2>한눈에 보기</h2>
+    <div class="flow">
+      <div class="node"><span class="n">1</span><b>계열·학년</b>선택</div>
+      <div class="node"><span class="n">2</span><b>학생 등록</b>추가/일괄</div>
+      <div class="node"><span class="n">3</span><b>체크 + 메모</b>입력</div>
+      <div class="node"><span class="n">4</span><b>생성</b>개별/전체</div>
+      <div class="node"><span class="n">5</span><b>검토·저장</b>엑셀</div>
+    </div>
+    <div class="call tip" style="margin-top:14px;"><span class="t">두 개의 탭</span>화면 상단에서 <b>행동특성</b> 탭과 <b>세부능력 및 특기사항(세특)</b> 탭을 전환할 수 있습니다. 탭을 바꿔도 입력 내용은 보존됩니다. 아래 STEP 1~6은 <b>행동특성</b> 탭 기준이며, 세특 탭은 뒤쪽 <b>‘세특 탭 사용법’</b>에서 따로 설명합니다.</div>
+  </div>
+
+  <hr class="div" />
+
+  <!-- STEP 0 -->
+  <div class="step zero">
+    <div class="num">0</div>
+    <div class="body">
+      <h3>최초 1회 · API 키 등록 (관리자 설정)</h3>
+      <p>이 도구는 구글 <b>Gemini</b>로 문장을 만듭니다. 학교(또는 담당 선생님)가 키를 한 번만 넣어 두면, 이후 사용하는 모든 분은 키 입력 없이 바로 쓸 수 있습니다.</p>
+      <ol class="sub">
+        <li>구글 AI Studio 접속 → <code>aistudio.google.com/apikey</code> 에서 <b>API 키 만들기</b></li>
+        <li>발급된 키를 복사</li>
+        <li>코드 맨 위 설정 블록의 <code>apiKey</code> 값에 붙여넣기</li>
+      </ol>
+<pre><span class="c">// 코드 상단 — 이 부분만 수정하면 됩니다</span>
+<span class="k">const</span> AI_CONFIG = {
+  provider: <span class="s">"gemini"</span>,
+  gemini: {
+    apiKey: <span class="s">"여기에_본인_키_붙여넣기"</span>,   <span class="c">// ← 여기</span>
+    model:  <span class="s">"gemini-2.5-flash"</span>,
+  },
+};</pre>
+      <div class="call tip"><span class="t">무료로 충분합니다</span>Gemini Flash 계열은 무료 사용량이 넉넉해, 한 학교에서 한 학급~여러 학급을 처리하는 정도면 대개 비용이 들지 않습니다. 사용량이 매우 많아지면 유료 전환이 필요할 수 있습니다.</div>
+      <div class="call warn"><span class="t">키를 코드에 못 넣는 상황이라면</span>화면 우측 상단 <b>키 입력</b>을 누르고 키를 붙여넣으면 그 자리에서 바로 테스트할 수 있습니다. 단, 이 방식은 새로고침하면 사라지므로 정식 배포에는 위 코드 등록 방식을 쓰세요.</div>
+    </div>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="step">
+    <div class="num">1</div>
+    <div class="body">
+      <h3>계열과 학년 선택 <span style="font-size:13px;color:var(--slate-soft);font-weight:400;">(행동특성 탭)</span></h3>
+      <p>상단 설정 줄에서 <b>계열</b>(인문계 / 특성화고(공업계) / 특성화고(상업계) / 마이스터고 — 4가지 중 택1)과 <b>학년</b>(1~3)을 고릅니다. 선택에 맞춰 아래 체크 항목이 자동으로 바뀝니다.</p>
+      <ul class="sub">
+        <li>특성화고·마이스터고를 고르면 <b>전공·실습, 진로·자격</b> 항목이 추가됩니다.</li>
+        <li>1학년은 <b>적응</b>, 2학년은 <b>자치·주도</b>, 3학년은 <b>진로·진학(또는 취업)</b> 항목이 붙습니다.</li>
+      </ul>
+      <div class="call tip"><span class="t">중간에 바꿔도 안전</span>학생을 입력하다가 계열·학년을 바꾸면, 새 설정에 없는 체크는 자동으로 정리됩니다(공통 항목은 유지).</div>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step">
+    <div class="num">2</div>
+    <div class="body">
+      <h3>학생 등록</h3>
+      <p>한 명씩 또는 반 전체를 한 번에 넣을 수 있습니다.</p>
+      <ul class="sub">
+        <li><b>학생 추가</b> — 빈 카드를 한 장씩 추가</li>
+        <li><b>이름 일괄 추가</b> — 이름을 한 줄에 하나씩 붙여넣으면 번호가 자동으로 매겨지며 한꺼번에 생성됩니다(반 전체에 유용).</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step">
+    <div class="num">3</div>
+    <div class="body">
+      <h3>특성 체크 + 메모 입력</h3>
+      <p>각 학생 카드에서 해당하는 <b>특성 버튼을 눌러 선택</b>하고, 아래 <b>메모</b> 칸에 구체적인 관찰 내용을 자유롭게 적습니다.</p>
+      <div class="call tip"><span class="t">메모가 결과의 질을 좌우합니다</span>체크만 하면 일반적인 문장이 나오고, 메모에 실제 사례(예: “학기 초 소극적이었으나 모둠 발표 이후 자신감 향상”, “또래 멘토링 자원”)를 적을수록 그 학생만의 구체적인 문장이 나옵니다.</div>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step">
+    <div class="num">4</div>
+    <div class="body">
+      <h3>생성하기</h3>
+      <ul class="sub">
+        <li>카드의 <b>생성</b> 버튼 — 그 학생 한 명만 생성</li>
+        <li>상단 <b>전체 생성</b> — 입력된 모든 학생을 차례로 생성(결과가 끝나는 대로 표시)</li>
+      </ul>
+      <p>마음에 안 들면 <b>다시 생성</b>으로 새 문장을 받을 수 있습니다. 결과는 그대로 두지 말고 다음 단계에서 검토·수정하세요.</p>
+    </div>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="step">
+    <div class="num">5</div>
+    <div class="body">
+      <h3>글자수(바이트) 관리</h3>
+      <p>생성된 문장 아래에 막대 게이지가 색으로 분량을 알려 줍니다.</p>
+      <div class="chips">
+        <span class="chip"><span class="dot g"></span> 여유 (제한의 80% 미만)</span>
+        <span class="chip"><span class="dot a"></span> 임박 (80% 이상)</span>
+        <span class="chip"><span class="dot r"></span> 초과 (제한 넘음)</span>
+      </div>
+      <p><b>한글 2B / 3B 토글</b>과 <b>제한(바이트)</b>은 직접 조절합니다.</p>
+      <table>
+        <tr><th>설정</th><th>의미</th></tr>
+        <tr><td>3B (기본)</td><td>현재 NEIS(UTF-8) 기준 — 한글 1자 = 3바이트</td></tr>
+        <tr><td>2B</td><td>옛 기준 — 한글 1자 = 2바이트(일부 학교/항목)</td></tr>
+        <tr><td>제한</td><td>항목별 허용 분량(기본 1500바이트). 학교 기준에 맞춰 숫자 변경</td></tr>
+      </table>
+      <div class="call warn"><span class="t">게이지가 기준입니다</span>AI는 분량을 “대략” 맞추려 하지만 바이트를 정확히 세지는 못합니다. 최종 분량은 반드시 게이지를 보고 문장을 직접 다듬어 맞추세요.</div>
+    </div>
+  </div>
+
+  <!-- STEP 6 -->
+  <div class="step">
+    <div class="num">6</div>
+    <div class="body">
+      <h3>검토하고 엑셀로 저장</h3>
+      <ul class="sub">
+        <li>결과 칸을 클릭해 <b>직접 수정</b>할 수 있습니다(수정 즉시 글자수 재계산).</li>
+        <li><b>카드 / 표</b> 보기를 전환해 반 전체를 표로 훑어볼 수 있습니다.</li>
+        <li><b>엑셀 저장</b>을 누르면 <code>.xlsx</code> 파일이 내려받아집니다.</li>
+      </ul>
+      <p>엑셀 컬럼: 번호 · 이름 · 계열 · 학년 · 행동특성 및 종합의견 · 글자수 · 제한초과(O).</p>
+    </div>
+  </div>
+
+  <!-- 세특 탭 -->
+  <h2 class="sec">세특 탭 사용법 (세부능력 및 특기사항)</h2>
+  <p class="sec-desc">상단 <b>세부능력 및 특기사항</b> 탭은 과목 단위로 작성합니다. 과목 설정은 한 번만 입력하면 그 과목 학생 전원(최대 25명)에게 공통 적용됩니다.</p>
+
+  <div class="step">
+    <div class="num">A</div>
+    <div class="body">
+      <h3>과목 만들기 · 유형 선택</h3>
+      <ul class="sub">
+        <li><b>과목 추가</b>로 여러 과목을 탭으로 관리합니다. 각 과목 탭의 <b>×</b>로 삭제할 수 있습니다.</li>
+        <li><b>과목 유형</b>을 고릅니다 — <b>일반 교과</b>(탐구·사고·개념 이해 중심) 또는 <b>NCS 전문교과</b>(직무 수행·기능 숙련 중심). 유형에 따라 활동 유형 후보와 문체가 달라집니다.</li>
+        <li><b>과목명</b>(예: 전기회로, 화학Ⅰ)과 <b>제한(바이트)</b>을 과목별로 설정합니다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">B</div>
+    <div class="body">
+      <h3>과목 공통 정보 입력 (한 번만)</h3>
+      <ul class="sub">
+        <li><b>성취기준 / 능력단위·수행준거</b> — 일반 교과는 성취기준, NCS는 능력단위·수행준거를 입력합니다.</li>
+        <li><b>수업 활동 유형</b> — 토론·발표·실험·프로젝트(일반) 또는 실습·직무 수행·안전관리(NCS) 등 버튼으로 선택, 기타는 직접 입력.</li>
+        <li><b>공통 활동 내용 / 수행평가 기준</b> — 반 전체가 함께 한 활동·평가 맥락을 적습니다.</li>
+        <li><b>교사 관점·서술 방향</b>(선택) — 성장 중시, 진로 연계 등 서술의 초점을 지정합니다.</li>
+      </ul>
+      <div class="call tip"><span class="t">한 번 입력 → 25명 공통</span>위 과목 정보는 학생마다 다시 쓸 필요 없이 그 과목 전원에게 자동 적용됩니다.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">C</div>
+    <div class="body">
+      <h3>학생별 참여 수준 + 개별 메모 → 생성</h3>
+      <ul class="sub">
+        <li>학생마다 <b>참여 수준</b>(주도적 / 적극적 / 보통 / 미흡)을 고르면 그 수준에 맞춰 톤이 차등 적용됩니다(‘미흡’도 부정적 낙인 없이 절제하여 서술).</li>
+        <li><b>개별 메모</b>에 그 학생만의 모습을 적을수록 결과가 구체화됩니다.</li>
+        <li>행마다 <b>생성</b> 버튼, 또는 상단 <b>이 과목 전체 생성</b>으로 일괄 생성합니다. <b>이름 일괄 추가</b>도 지원합니다(과목당 최대 25명).</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">D</div>
+    <div class="body">
+      <h3>엑셀로 저장 (전 과목)</h3>
+      <p><b>엑셀 저장(전 과목)</b>을 누르면 과목별로 <b>시트가 분리된</b> 하나의 <code>.xlsx</code>가 내려받아집니다.</p>
+      <p>엑셀 컬럼: 번호 · 이름 · 과목 · 참여수준 · 세부능력 및 특기사항 · 글자수 · 제한초과(O).</p>
+    </div>
+  </div>
+
+  <!-- FAQ -->
+  <h2 class="sec">문제 해결</h2>
+  <p class="sec-desc">자주 나오는 상황과 해결법입니다.</p>
+
+  <details>
+    <summary>생성을 눌러도 아무 일이 없거나 오류가 떠요</summary>
+    <div class="ans">대개 API 키 문제입니다. ① 코드의 <code>apiKey</code>가 올바른지, ② 또는 우측 상단 <b>키 입력</b>에 키를 넣었는지 확인하세요. 키 옆에 <b>● 사용 가능</b> 표시가 떠야 정상입니다.</div>
+  </details>
+  <details>
+    <summary>“응답이 비어 있습니다”라고 나와요</summary>
+    <div class="ans">모델명이 맞는지(<code>gemini-2.5-flash</code> 등), 또는 안전 필터에 걸릴 만한 표현이 메모에 없는지 확인하세요. 메모를 다듬고 다시 생성하면 해결되는 경우가 많습니다.</div>
+  </details>
+  <details>
+    <summary>네트워크/연결 오류가 떠요 (브라우저에서 막힘)</summary>
+    <div class="ans">브라우저에서 Gemini로 직접 요청하는 구조라, 일부 환경(보안 설정·사내망)에서 차단될 수 있습니다. 다른 브라우저나 네트워크로 시도하고, 정식 배포 시에는 안정적인 호스팅 환경에서 사용하세요.</div>
+  </details>
+  <details>
+    <summary>잠시 잘 되다가 갑자기 막혀요 (429 / 사용량 초과)</summary>
+    <div class="ans">무료 사용량의 분당 요청 한도를 넘은 것입니다. <b>전체 생성</b>은 학생 사이에 간격을 두고 처리하지만, 인원이 많으면 잠시 기다렸다가 다시 시도하세요. 지속적으로 많이 쓴다면 유료 전환을 고려합니다.</div>
+  </details>
+  <details>
+    <summary>결과가 글자수 제한을 자꾸 넘어요</summary>
+    <div class="ans">정상입니다. 게이지가 빨강이면 문장을 줄여 직접 맞추거나, 제한값을 학교 기준에 맞게 올리세요. 또는 체크 항목을 줄여 다시 생성하면 짧아집니다.</div>
+  </details>
+
+  <!-- 관리자 -->
+  <h2 class="sec">다른 AI로 바꾸기 (관리자용)</h2>
+  <p class="sec-desc">나중에 클로드·GPT 등 다른 모델로 교체하기 쉽도록 호출부가 한곳에 모여 있습니다.</p>
+  <pre><span class="c">// 1) aiProviders 에 함수 하나 추가</span>
+<span class="c">// 2) AI_CONFIG.provider 값만 바꾸면 끝</span>
+<span class="k">const</span> aiProviders = {
+  gemini: (prompt, key, maxTokens) => callGemini(...),
+  <span class="c">// anthropic: (prompt, key, maxTokens) => callAnthropic(...),</span>
+};</pre>
+
+  <!-- 책임 사용 -->
+  <h2 class="sec">반드시 지켜 주세요</h2>
+  <div class="call danger"><span class="t">최종 책임은 교사에게 있습니다</span>생성 문장은 <b>초안</b>입니다. 사실과 다른 내용(없던 수상·수치 등)이 섞일 수 있으므로, 기록 전 반드시 교사가 확인하고 사실에 맞게 수정하세요.</div>
+  <div class="call warn"><span class="t">개인정보 주의</span>입력 내용은 외부 AI 서비스(구글)로 전송됩니다. 주민번호·연락처·건강·가정사 등 <b>민감한 개인정보는 메모에 적지 마세요.</b> 작성에 꼭 필요한 관찰 내용만 입력하는 것이 안전합니다.</div>
+
+  <footer>
+    행동특성 및 종합의견 생성기 · 사용 가이드북 — 교내 활용을 위한 안내 문서
+  </footer>
+
+</div>
+</div>
+</body>
+</html>
