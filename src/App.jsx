@@ -82,12 +82,20 @@ const GRADE = {
     voc: [{ group: "진로·취업 (3학년)", items: ["취업 의지 확고", "현장실습 성실", "직업의식", "구직 활동 적극", "사회 진출 준비"] }],
   },
 };
+// 보완할 점(부정적·성장 방향) — 모든 계열·학년 공통. 프롬프트에서 완곡·건설적으로 서술하도록 처리.
+const IMPROVE = {
+  group: "보완할 점 (성장 방향)",
+  tone: "warn",
+  items: ["수업 집중 기복", "과제 제출 지연", "발표에 소극적", "자신감 부족", "정리정돈 미흡", "감정 조절 연습 필요", "교우관계 폭 좁음", "지각·결석 잦음", "끈기 부족"],
+};
+const NEGATIVE_SET = new Set(IMPROVE.items);
 function getCategories(track, grade) {
   const list = [...COMMON];
   if (isVoc(track)) list.push(...VOC);
   if (track === "meister") list.push(...MEISTER);
   if (grade === 3) list.push(...(isVoc(track) ? GRADE[3].voc : GRADE[3].humanities));
   else list.push(...GRADE[grade]);
+  list.push(IMPROVE);
   return list;
 }
 const validItemSet = (track, grade) => new Set(getCategories(track, grade).flatMap((c) => c.items));
@@ -123,25 +131,31 @@ function joinList(arr, etc) {
    ============================================================ */
 function buildBehaviorPrompt({ track, grade, checks, memo, byteLimit, byteMode, teacher }) {
   const trackLabel = TRACK_LABELS[track];
-  const checkedText = checks.length ? checks.join(", ") : "(선택된 항목 없음)";
+  const strengths = checks.filter((c) => !NEGATIVE_SET.has(c));
+  const improves = checks.filter((c) => NEGATIVE_SET.has(c));
   const L = [];
   L.push(`당신은 한국 고등학교 담임교사로서 학교생활기록부의 '행동특성 및 종합의견'을 작성하는 전문가입니다.`);
   L.push(`다음 정보를 바탕으로 한 학생의 행동특성 및 종합의견을 작성하세요.\n`);
   L.push(`[학생 정보]`);
   L.push(`- 계열: ${trackLabel}`);
   L.push(`- 학년: ${grade}학년`);
-  L.push(`- 관찰된 특성(체크 항목): ${checkedText}`);
+  L.push(`- 관찰된 강점(체크 항목): ${strengths.length ? strengths.join(", ") : "(선택된 항목 없음)"}`);
+  if (improves.length) L.push(`- 보완·성장 필요(체크 항목): ${improves.join(", ")}`);
   L.push(`- 교사 관찰 메모: ${memo && memo.trim() ? memo.trim() : "(없음)"}`);
   if (teacher) { L.push(``); L.push(`[작성 방향(교사 관점)]`); L.push(`- ${teacher}`); }
   L.push(``);
+  const rules = [
+    `학교생활기록부 문체: 객관적·관찰 중심, 문장 종결은 '~함','~임','~을 보임' 등 명사형/음슴체로 통일.`,
+    `제3자 관찰 시점. '저는/나는' 1인칭이나 '~했습니다' 경어체는 절대 사용 금지.`,
+    `주어진 정보에만 근거. 제공되지 않은 구체적 수치·대회명·상장 등 거짓 사실은 지어내지 말 것.`,
+    `체크 항목과 메모를 자연스럽게 한 문단으로 엮되, 단순 나열이 아니라 맥락 있게 서술.`,
+  ];
+  if (improves.length) rules.push(`'보완·성장 필요' 항목은 단정적 비난이나 부정적 낙인 없이, 개선을 위한 노력·성장 가능성·지도 방향을 중심으로 완곡하고 따뜻하게 서술할 것. 강점을 먼저 서술한 뒤 보완점을 균형 있게 덧붙임.`);
+  if (teacher) rules.push(`위 '작성 방향'을 반영하여 서술의 초점을 맞출 것.`);
+  rules.push(`${trackLabel} ${grade}학년의 발달 단계·진로 맥락에 맞는 어조 사용.`);
+  rules.push(`분량은 약 ${byteLimit}바이트(한글 기준 약 ${approxChars(byteLimit, byteMode)}자) 이내. 완성된 문단만 출력하고 머리말·제목·따옴표·번호는 붙이지 말 것.`);
   L.push(`[작성 규칙]`);
-  L.push(`1. 학교생활기록부 문체: 객관적·관찰 중심, 문장 종결은 '~함','~임','~을 보임' 등 명사형/음슴체로 통일.`);
-  L.push(`2. 제3자 관찰 시점. '저는/나는' 1인칭이나 '~했습니다' 경어체는 절대 사용 금지.`);
-  L.push(`3. 주어진 정보에만 근거. 제공되지 않은 구체적 수치·대회명·상장 등 거짓 사실은 지어내지 말 것.`);
-  L.push(`4. 체크 항목과 메모를 자연스럽게 한 문단으로 엮되, 단순 나열이 아니라 맥락 있게 서술.`);
-  if (teacher) L.push(`5. 위 '작성 방향'을 반영하여 서술의 초점을 맞출 것.`);
-  L.push(`${teacher ? 6 : 5}. ${trackLabel} ${grade}학년의 발달 단계·진로 맥락에 맞는 어조 사용.`);
-  L.push(`${teacher ? 7 : 6}. 분량은 약 ${byteLimit}바이트(한글 기준 약 ${approxChars(byteLimit, byteMode)}자) 이내. 완성된 문단만 출력하고 머리말·제목·따옴표·번호는 붙이지 말 것.`);
+  rules.forEach((r, i) => L.push(`${i + 1}. ${r}`));
   L.push(``);
   L.push(`행동특성 및 종합의견:`);
   return L.join("\n");
@@ -239,22 +253,25 @@ function CheckGroups({ track, grade, checks, onToggle }) {
   const set = useMemo(() => new Set(checks), [checks]);
   return (
     <div className="space-y-3">
-      {cats.map((cat) => (
+      {cats.map((cat) => {
+        const warn = cat.tone === "warn";
+        return (
         <div key={cat.group}>
-          <div className="text-xs font-semibold text-indigo-700 mb-1.5">{cat.group}</div>
+          <div className={`text-xs font-semibold mb-1.5 ${warn ? "text-amber-700" : "text-indigo-700"}`}>{cat.group}</div>
           <div className="flex flex-wrap gap-1.5">
             {cat.items.map((item) => {
               const on = set.has(item);
+              const onCls = warn ? "bg-amber-500 border-amber-500 text-white" : "bg-indigo-600 border-indigo-600 text-white";
+              const offCls = warn ? "bg-white border-amber-300 text-amber-700 hover:border-amber-400" : "bg-white border-slate-300 text-slate-600 hover:border-indigo-400";
               return (
                 <button key={item} onClick={() => onToggle(item)}
-                  className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
-                    on ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:border-indigo-400"
-                  }`}>{item}</button>
+                  className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${on ? onCls : offCls}`}>{item}</button>
               );
             })}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
