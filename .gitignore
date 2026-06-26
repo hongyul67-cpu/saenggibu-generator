@@ -5,6 +5,7 @@ node_modules
 dist
 dist-ssr
 dist-single
+dist-deploy
 # 단일 HTML 빌드 산출물(키가 인라인될 수 있어 커밋 금지)
 *생기부생성기*.html
 

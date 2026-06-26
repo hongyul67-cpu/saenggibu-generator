@@ -723,11 +723,24 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
 /* ============================================================
    메인 (탭 전환)
    ============================================================ */
+const IS_DIST = import.meta.env.VITE_DIST === "1"; // 배포용 빌드 표시(키 미포함)
+const KEY_STORE = "saenggibu_gemini_key";
+const readStoredKey = () => { try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; } };
+
 export default function App() {
   const [mainTab, setMainTab] = useState("behavior");
   const [byteMode, setByteMode] = useState(3);
-  const [apiKeyOverride, setApiKeyOverride] = useState("");
-  const [showKey, setShowKey] = useState(false);
+  const [apiKeyOverride, setApiKeyOverride] = useState(readStoredKey);
+  const [rememberKey, setRememberKey] = useState(() => !!readStoredKey());
+  const [showKey, setShowKey] = useState(() => IS_DIST && !readStoredKey());
+
+  // 키를 이 브라우저에 저장(선택). 끄면 저장본을 지우고 새로고침 시 사라짐.
+  useEffect(() => {
+    try {
+      if (rememberKey && apiKeyOverride) localStorage.setItem(KEY_STORE, apiKeyOverride);
+      else localStorage.removeItem(KEY_STORE);
+    } catch {}
+  }, [apiKeyOverride, rememberKey]);
 
   const keyConfigured = (() => {
     const k = apiKeyOverride || AI_CONFIG.gemini.apiKey;
@@ -744,6 +757,11 @@ export default function App() {
             <h1 className="text-lg font-bold leading-tight">생기부 문장 생성기</h1>
             <p className="text-xs text-slate-500">행동특성 · 세부능력 및 특기사항 · 글자수(바이트) 관리</p>
           </div>
+          {IS_DIST && (
+            <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+              <KeyRound size={12} /> 배포용 · 키 직접 입력
+            </span>
+          )}
         </header>
 
         {/* 메인 탭 */}
@@ -762,7 +780,12 @@ export default function App() {
         {!keyConfigured && (
           <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
             <KeyRound size={16} className="mt-0.5 shrink-0" />
-            <div><b>API 키가 아직 설정되지 않았어요.</b> 코드 상단 <code className="rounded bg-amber-100 px-1">AI_CONFIG.gemini.apiKey</code>에 키를 넣거나, 아래 <button onClick={() => setShowKey(true)} className="underline">키 직접 입력</button>으로 지금 테스트할 수 있어요.</div>
+            <div>
+              <b>시작하려면 본인 Gemini API 키를 입력하세요.</b>{" "}
+              <button onClick={() => setShowKey(true)} className="font-medium underline">키 입력 열기</button>
+              {!IS_DIST && <> · 또는 코드 상단 <code className="rounded bg-amber-100 px-1">AI_CONFIG.gemini.apiKey</code>에 넣기</>}
+              <span className="mt-0.5 block text-xs text-amber-600">키 발급: aistudio.google.com/apikey · 입력한 키는 구글에만 전송되며 별도 서버에 저장되지 않습니다.</span>
+            </div>
           </div>
         )}
 
@@ -779,9 +802,13 @@ export default function App() {
           </label>
           <button onClick={() => setShowKey((v) => !v)} className="ml-auto inline-flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-600"><KeyRound size={13} /> 키 입력</button>
           {showKey && (
-            <div className="flex w-full items-center gap-2 border-t border-slate-100 pt-2">
-              <input type="password" value={apiKeyOverride} onChange={(e) => setApiKeyOverride(e.target.value)} placeholder="테스트용 Gemini API 키 (이 세션에서만 사용)" className="flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
+            <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 border-t border-slate-100 pt-2">
+              <input type="password" value={apiKeyOverride} onChange={(e) => setApiKeyOverride(e.target.value)} placeholder="Gemini API 키 붙여넣기 (aistudio.google.com/apikey)" className="min-w-[200px] flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
               <span className={`text-xs ${keyConfigured ? "text-emerald-600" : "text-slate-400"}`}>{keyConfigured ? "● 사용 가능" : "○ 미설정"}</span>
+              <label className="inline-flex items-center gap-1.5 text-xs text-slate-500" title="끄면 새로고침 시 키가 사라집니다">
+                <input type="checkbox" checked={rememberKey} onChange={(e) => setRememberKey(e.target.checked)} className="accent-indigo-600" /> 이 브라우저에 저장
+              </label>
+              {apiKeyOverride && <button onClick={() => setApiKeyOverride("")} className="text-xs text-slate-400 hover:text-red-500">지우기</button>}
             </div>
           )}
         </div>

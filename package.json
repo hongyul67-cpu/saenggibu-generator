@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:single": "vite build --config vite.config.single.js",
+    "build:dist": "vite build --config vite.config.dist.js",
     "preview": "vite preview"
   },
   "dependencies": {
