@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   Plus, Trash2, Sparkles, Download, Copy, Check, AlertTriangle, Users, Loader2,
-  Table, LayoutGrid, KeyRound, FileSpreadsheet, RefreshCw, X, ListPlus, BookOpen, ClipboardList
+  Table, LayoutGrid, KeyRound, FileSpreadsheet, RefreshCw, X, ListPlus, BookOpen, ClipboardList, ShieldCheck, Flag, Hash, ExternalLink
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -127,15 +127,57 @@ function joinList(arr, etc) {
 }
 
 /* ============================================================
+   생기부 작성요령 기준 데이터 (2026학년도 기준 · 일반 작성 원칙 요약)
+   - AI가 이 원칙을 근간으로 문장을 생성하도록 프롬프트에 주입합니다.
+   - 화면에서 편집·초기화할 수 있으며, 학교/교육청 공식 기재요령으로 교체해도 됩니다.
+   ============================================================ */
+const GUIDELINES_DEFAULT = `[학교생활기록부 작성요령 기준 (2026학년도 · 일반 원칙 요약)]
+
+■ 문체·형식
+- 문장 종결은 '~함', '~임', '~을 보임' 등 명사형(개조식)으로 통일한다.
+- 교사가 관찰한 제3자 시점으로 객관적·구체적으로 서술한다.
+- 학생 이름, 1인칭(저는/나는), 경어체(~했습니다)는 사용하지 않는다.
+
+■ 사실 기반·근거주의
+- 교사가 직접 관찰·확인한 사실과 근거자료에 기반하여 기재한다.
+- 추측, 과장, 미화, 근거 없는 칭찬은 지양하고 활동의 과정과 변화·성장을 중심으로 쓴다.
+- 제공되지 않은 수치·대회명·수상·기관명 등 확인되지 않은 사실은 지어내지 않는다.
+
+■ 기재 금지·유의 사항(매년 강조)
+- 교외 상, 교외 대회 실적, 각종 인증시험(공인 어학성적 등) 점수·자격은 기재하지 않는다.
+- 모의고사·전국연합학력평가 성적·석차, 특정 대학명·기관명은 기재하지 않는다.
+- 부모(보호자)의 사회·경제적 지위나 직업, 사교육을 유발하는 내용은 기재하지 않는다.
+- 논문·도서 출간, 발명특허, 해외 어학연수 등 학교 밖 실적은 기재하지 않는다.
+- 특정 종교·정치적으로 편향된 표현은 사용하지 않는다.
+
+■ 세부능력 및 특기사항(세특)
+- 교육과정 성취기준과 수업 중 학습·탐구 활동을 근거로, 그 학생만의 특성이 드러나게 쓴다.
+- 참여 수준에 따라 톤을 차등하되, 낮은 수준도 낙인 없이 기본 참여와 성장 가능성 위주로 절제하여 쓴다.
+
+■ 행동특성 및 종합의견(행특)
+- 학습·인성·진로 등을 총체적으로 종합하여 추천서 성격으로 기술한다.
+- 변화와 성장의 과정을 중심으로 하고, 보완할 점은 완곡하게 개선 노력·지도 방향 중심으로 쓴다.
+
+※ 위 내용은 일반 작성 원칙 요약본입니다. 세부 규정은 해당 연도 교육부·교육청 '학교생활기록부 기재요령'을 확인하세요.`;
+
+// 프롬프트에 넣을 작성요령 블록(과도한 길이 방지를 위해 그대로 삽입)
+function guidelineBlock(guidelines) {
+  const g = (guidelines || "").trim();
+  return g ? `${g}\n\n위 '학교생활기록부 작성요령 기준'을 반드시 준수하여 작성할 것.\n` : "";
+}
+
+/* ============================================================
    프롬프트 빌더
    ============================================================ */
-function buildBehaviorPrompt({ track, grade, checks, memo, byteLimit, byteMode, teacher }) {
+function buildBehaviorPrompt({ track, grade, checks, memo, byteLimit, byteMode, teacher, guidelines }) {
   const trackLabel = TRACK_LABELS[track];
   const strengths = checks.filter((c) => !NEGATIVE_SET.has(c));
   const improves = checks.filter((c) => NEGATIVE_SET.has(c));
   const L = [];
   L.push(`당신은 한국 고등학교 담임교사로서 학교생활기록부의 '행동특성 및 종합의견'을 작성하는 전문가입니다.`);
   L.push(`다음 정보를 바탕으로 한 학생의 행동특성 및 종합의견을 작성하세요.\n`);
+  const gb = guidelineBlock(guidelines);
+  if (gb) L.push(gb);
   L.push(`[학생 정보]`);
   L.push(`- 계열: ${trackLabel}`);
   L.push(`- 학년: ${grade}학년`);
@@ -161,7 +203,7 @@ function buildBehaviorPrompt({ track, grade, checks, memo, byteLimit, byteMode, 
   return L.join("\n");
 }
 
-function buildSubjectPrompt({ subject, student, byteMode }) {
+function buildSubjectPrompt({ subject, student, byteMode, guidelines }) {
   const { name, type, standard, activities, activityEtc, commonActivity, evalMemo, byteLimit } = subject;
   const isNcs = type === "ncs";
   const teacher = joinList(subject.teacherChecks, subject.teacherEtc);
@@ -169,6 +211,8 @@ function buildSubjectPrompt({ subject, student, byteMode }) {
   const L = [];
   L.push(`당신은 한국 고등학교 ${name ? `'${name}' ` : ""}교과 담당교사로서 학교생활기록부의 '세부능력 및 특기사항'을 작성하는 전문가입니다.`);
   L.push(`다음 정보를 바탕으로 한 학생의 세부능력 및 특기사항을 작성하세요.\n`);
+  const gb = guidelineBlock(guidelines);
+  if (gb) L.push(gb);
   L.push(`[과목 정보]`);
   if (name) L.push(`- 과목명: ${name}`);
   L.push(`- 과목 유형: ${isNcs ? "NCS 전문교과(직무·수행 중심)" : "일반 교과"}`);
@@ -209,13 +253,25 @@ const newBehaviorStudent = (name = "", number = "") => ({
 });
 const newSubStudent = (name = "", number = "") => ({
   id: uid(), name, number, level: "보통", memo: "", result: "", status: "idle", error: null,
+  segments: {}, // 공동 교과: { [teacherId]: 텍스트 }
+  picks: {},    // 활동 주제별: { [topicId]: 수준 }
 });
+const newCoTeacher = (name = "") => ({ id: uid(), name, limit: 500 });
+const newTopic = (name = "") => ({ id: uid(), name, levels: { 주도적: "", 적극적: "", 보통: "", 미흡: "" } });
 const newSubject = (name = "") => ({
   id: uid(), name, type: "general", standard: "",
   activities: [], activityEtc: "", commonActivity: "", evalMemo: "",
   teacherChecks: [], teacherEtc: "", byteLimit: 1500,
+  coTeaching: false, coTeachers: [],
+  topicMode: false, topics: [],
   students: [newSubStudent()],
 });
+// 공동 교과 합산: 각 교사 입력을 앞뒤 공백 제거 후, 내용이 있는 것만 빈 칸 1칸으로 이어붙임
+const mergeSegments = (teachers, segments) =>
+  (teachers || []).map((t) => (segments?.[t.id] || "").trim()).filter(Boolean).join(" ");
+// 활동 주제별: 학생이 주제마다 고른 수준의 내용을 순서대로 빈 칸 1칸으로 이어붙임
+const compileTopics = (topics, picks) =>
+  (topics || []).map((t) => { const lv = picks?.[t.id]; return lv ? (t.levels?.[lv] || "").trim() : ""; }).filter(Boolean).join(" ");
 
 /* ============================================================
    공용 컴포넌트
@@ -245,6 +301,59 @@ function CopyBtn({ text }) {
     >
       {done ? <Check size={13} /> : <Copy size={13} />}{done ? "복사됨" : "복사"}
     </button>
+  );
+}
+
+/* 제한 초과 시 보여줄 재치있는 안내 문구 (필드마다 다른 문구가 나오도록 seed로 선택) */
+const OVER_MESSAGES = [
+  "그만 입력하라니까요… 😤 여기서 더 늘리면 NEIS가 거부해요.",
+  "칸이 꽉 찼어요! 이제 늘릴 게 아니라 덜어낼 시간입니다 ✂️",
+  "제한 초과! 명문(名文)은 짧을수록 빛나는 법이죠 ✨",
+  "여기서 한 글자만 더 넣으면… 저장이 안 돼요! 🙅",
+];
+function pickOverMessage(seed = "") {
+  let h = 0;
+  for (const c of String(seed)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return OVER_MESSAGES[h % OVER_MESSAGES.length];
+}
+
+/* ============================================================
+   바이트 제한 입력창
+   - 입력 중 바이트수를 실시간 표시
+   - 제한 초과 상태에서 '더 늘리는' 입력은 차단(삭제·수정, AI 결과 세팅은 허용)
+   - 초과 시 테두리·배경을 빨간색으로, 재치있는 안내 문구 표시
+   ============================================================ */
+function LimitedTextarea({ value, onChange, limit, byteMode, rows = 4, placeholder, accent = "indigo", seed = "" }) {
+  const bytes = countBytes(value, byteMode);
+  const over = limit > 0 && bytes > limit;
+  const handle = (e) => {
+    const next = e.target.value;
+    // 이미 제한을 넘겼거나 넘기게 되는데도 '더 늘리는' 입력이면 무시(줄이는 편집은 항상 허용)
+    if (limit > 0) {
+      const nb = countBytes(next, byteMode);
+      if (nb > limit && nb > bytes) return;
+    }
+    onChange(next);
+  };
+  const focusCls = accent === "teal" ? "focus:border-teal-500" : "focus:border-indigo-500";
+  return (
+    <div>
+      <textarea
+        value={value}
+        onChange={handle}
+        rows={rows}
+        placeholder={placeholder}
+        spellCheck
+        className={`w-full resize-none rounded-md border px-3 py-2 text-sm leading-relaxed focus:outline-none transition-colors ${
+          over ? "border-red-400 bg-red-50 text-red-900 focus:border-red-500" : `border-slate-200 bg-white ${focusCls}`
+        }`}
+      />
+      {over && (
+        <div className="mt-1 flex items-start gap-1.5 rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-600">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {pickOverMessage(seed)}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -303,7 +412,7 @@ function TeacherPerspective({ checks, etc, onChecks, onEtc }) {
 /* ============================================================
    행특 탭
    ============================================================ */
-function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
+function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines }) {
   const [track, setTrack] = useState("tech");
   const [grade, setGrade] = useState(1);
   const [byteLimit, setByteLimit] = useState(1500);
@@ -333,7 +442,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
       const valid = validItemSet(track, grade);
       const checks = s.checks.filter((c) => valid.has(c));
       const teacher = joinList(teacherChecks, teacherEtc);
-      const prompt = buildBehaviorPrompt({ track, grade, checks, memo: s.memo, byteLimit, byteMode, teacher });
+      const prompt = buildBehaviorPrompt({ track, grade, checks, memo: s.memo, byteLimit, byteMode, teacher, guidelines });
       const text = await generateText(prompt, apiKeyOverride, maxTokensFor(byteLimit));
       patch(id, { result: text, status: "done" });
     } catch (e) { patch(id, { status: "error", error: e.message || "생성 실패" }); }
@@ -434,7 +543,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
       {view === "card" ? (
         <div className="space-y-3">
           {students.map((s, i) => {
-            const bytes = countBytes(s.result, byteMode), over = bytes > byteLimit;
+            const bytes = countBytes(s.result, byteMode);
             return (
               <div key={s.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-3">
@@ -455,8 +564,8 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
                 {s.error && <div className="mt-2 flex items-start gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-xs text-red-600"><AlertTriangle size={13} className="mt-0.5 shrink-0" /> {s.error}</div>}
                 {(s.result || s.status === "loading") && (
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <textarea value={s.result} onChange={(e) => patch(s.id, { result: e.target.value })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
-                      className={`w-full resize-none rounded-md border bg-white px-3 py-2 text-sm leading-relaxed focus:outline-none ${over ? "border-red-300 focus:border-red-500" : "border-slate-200 focus:border-indigo-500"}`} />
+                    <LimitedTextarea value={s.result} onChange={(v) => patch(s.id, { result: v })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
+                      limit={byteLimit} byteMode={byteMode} accent="indigo" seed={s.id} />
                     <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={s.result} /></div>
                   </div>
                 )}
@@ -477,7 +586,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
                   <tr key={s.id} className="border-b border-slate-100 align-top">
                     <td className="px-3 py-2"><input value={s.number} onChange={(e) => patch(s.id, { number: e.target.value })} placeholder={String(i + 1)} className="w-10 rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-indigo-500 focus:outline-none" /></td>
                     <td className="px-3 py-2"><input value={s.name} onChange={(e) => patch(s.id, { name: e.target.value })} placeholder="이름" className="w-20 rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-indigo-500 focus:outline-none" /></td>
-                    <td className="px-3 py-2"><textarea value={s.result} onChange={(e) => patch(s.id, { result: e.target.value })} rows={3} placeholder={s.status === "loading" ? "생성 중…" : "생성 또는 직접 입력"} className="w-full resize-none rounded border border-slate-200 px-2 py-1.5 text-sm leading-relaxed focus:border-indigo-500 focus:outline-none" /></td>
+                    <td className="px-3 py-2"><LimitedTextarea value={s.result} onChange={(v) => patch(s.id, { result: v })} rows={3} placeholder={s.status === "loading" ? "생성 중…" : "생성 또는 직접 입력"} limit={byteLimit} byteMode={byteMode} accent="indigo" seed={s.id} /></td>
                     <td className="px-3 py-2"><ByteGauge bytes={b} limit={byteLimit} /></td>
                     <td className="px-3 py-2"><button onClick={() => genOne(s.id)} disabled={s.status === "loading"} className="inline-flex items-center justify-center rounded-md bg-indigo-600 p-1.5 text-white hover:bg-indigo-700 disabled:opacity-50">{s.status === "loading" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}</button></td>
                   </tr>
@@ -494,36 +603,105 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
 /* ============================================================
    세특 탭
    ============================================================ */
-function SubjectStudentRow({ st, idx, byteMode, byteLimit, onChange, onRemove, onGenerate }) {
-  const bytes = countBytes(st.result, byteMode), over = bytes > byteLimit;
+function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeachers, topicMode, topics, onChange, onRemove, onGenerate }) {
+  const bytes = countBytes(st.result, byteMode);
+  const plain = !coTeaching && !topicMode;
+  const setSegment = (tid, text) => {
+    const segments = { ...(st.segments || {}), [tid]: text };
+    onChange({ segments, result: mergeSegments(coTeachers, segments) });
+  };
+  const setPick = (topicId, level) => {
+    const picks = { ...(st.picks || {}), [topicId]: level };
+    onChange({ picks, result: compileTopics(topics, picks) });
+  };
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-xs font-bold text-teal-700">{st.number || idx + 1}</div>
         <input value={st.number} onChange={(e) => onChange({ number: e.target.value })} placeholder="번호" className="w-12 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
         <input value={st.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="이름" className="w-24 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
-        <select value={st.level} onChange={(e) => onChange({ level: e.target.value })} className="rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none">
-          {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
-        </select>
-        <input value={st.memo} onChange={(e) => onChange({ memo: e.target.value })} placeholder="개별 메모·특이사항 (선택)" className="min-w-[140px] flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
-        <button onClick={onGenerate} disabled={st.status === "loading"} className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60">
-          {st.status === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-        </button>
-        <button onClick={onRemove} className="text-slate-300 hover:text-red-500"><Trash2 size={15} /></button>
+        {plain && (
+          <>
+            <select value={st.level} onChange={(e) => onChange({ level: e.target.value })} className="rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none">
+              {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+            <input value={st.memo} onChange={(e) => onChange({ memo: e.target.value })} placeholder="개별 메모·특이사항 (선택)" className="min-w-[140px] flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
+            <button onClick={onGenerate} disabled={st.status === "loading"} className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60">
+              {st.status === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            </button>
+          </>
+        )}
+        <button onClick={onRemove} className="ml-auto text-slate-300 hover:text-red-500"><Trash2 size={15} /></button>
       </div>
       {st.error && <div className="mt-2 flex items-start gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-xs text-red-600"><AlertTriangle size={13} className="mt-0.5 shrink-0" /> {st.error}</div>}
-      {(st.result || st.status === "loading") && (
-        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-          <textarea value={st.result} onChange={(e) => onChange({ result: e.target.value })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
-            className={`w-full resize-none rounded-md border bg-white px-3 py-2 text-sm leading-relaxed focus:outline-none ${over ? "border-red-300 focus:border-red-500" : "border-slate-200 focus:border-teal-500"}`} />
-          <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+
+      {/* 활동 주제별: 주제마다 수준 선택 → 자동 기록 */}
+      {topicMode ? (
+        <div className="mt-2 space-y-2">
+          {topics.length === 0 ? (
+            <div className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">위 '활동 주제별 입력' 설정에서 활동 주제를 먼저 추가하세요.</div>
+          ) : (
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {topics.map((t, ti) => (
+                <label key={t.id} className="flex items-center gap-1.5 text-sm">
+                  <span className="text-slate-500">{t.name || `주제 ${ti + 1}`}</span>
+                  <select value={st.picks?.[t.id] || ""} onChange={(e) => setPick(t.id, e.target.value)}
+                    className="rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none">
+                    <option value="">해당 없음</option>
+                    {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-2.5">
+            <div className="mb-1 text-xs font-semibold text-teal-700">자동 기록 결과 <span className="font-normal text-slate-400">(선택한 주제·수준 내용을 이어붙임 · 직접 수정 가능)</span></div>
+            <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={3} placeholder="주제별 수준을 선택하면 자동으로 기록됩니다"
+              limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id + "topic"} />
+            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+          </div>
         </div>
+      ) : coTeaching ? (
+        <div className="mt-2 space-y-2">
+          {coTeachers.length === 0 ? (
+            <div className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">위 '공동 교과' 설정에서 담당 교사를 먼저 추가하세요.</div>
+          ) : (
+            coTeachers.map((t, ti) => {
+              const val = st.segments?.[t.id] || "";
+              return (
+                <div key={t.id}>
+                  <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-teal-700">
+                    <span className="flex h-4 w-4 items-center justify-center rounded bg-teal-100 text-[10px] font-bold text-teal-700">{ti + 1}</span>
+                    {t.name || `교사 ${ti + 1}`}<span className="font-normal text-slate-400">· 제한 {t.limit}B</span>
+                  </div>
+                  <LimitedTextarea value={val} onChange={(v) => setSegment(t.id, v)} rows={2}
+                    placeholder={`${t.name || `교사 ${ti + 1}`} 담당 단원 내용`} limit={t.limit} byteMode={byteMode} accent="teal" seed={st.id + t.id} />
+                  <div className="mt-1"><ByteGauge bytes={countBytes(val, byteMode)} limit={t.limit} /></div>
+                </div>
+              );
+            })
+          )}
+          <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-2.5">
+            <div className="mb-1 text-xs font-semibold text-teal-700">자동 합산 결과 <span className="font-normal text-slate-400">(내용 있는 교사만 빈 칸 1칸으로 이어붙임)</span></div>
+            <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={3} placeholder="교사별 내용을 입력하면 자동으로 합쳐집니다 (직접 수정 가능)"
+              limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id + "merged"} />
+            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+          </div>
+        </div>
+      ) : (
+        (st.result || st.status === "loading") && (
+          <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+            <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
+              limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id} />
+            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+          </div>
+        )
       )}
     </div>
   );
 }
 
-function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
+function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines }) {
   const [subjects, setSubjects] = useState([newSubject("과목 1")]);
   const [activeId, setActiveId] = useState(subjects[0].id);
   const [busyAll, setBusyAll] = useState(false);
@@ -552,12 +730,40 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
     });
   };
 
+  const patchTeachers = (sid, teachers) => patchSubject(sid, { coTeachers: teachers });
+  const addTeacher = () => {
+    const list = active.coTeachers || [];
+    if (list.length >= 4) return;
+    patchTeachers(active.id, [...list, newCoTeacher(`교사 ${list.length + 1}`)]);
+  };
+  const removeTeacher = (tid) => patchTeachers(active.id, (active.coTeachers || []).filter((t) => t.id !== tid));
+  const patchTeacher = (tid, p) => patchTeachers(active.id, (active.coTeachers || []).map((t) => (t.id === tid ? { ...t, ...p } : t)));
+  const toggleCoTeaching = () => {
+    const on = !active.coTeaching;
+    // 처음 켤 때 교사 2명 기본 생성 / 공동 교과 켜면 활동 주제 모드는 끔
+    const teachers = on && (active.coTeachers || []).length === 0 ? [newCoTeacher("교사 1"), newCoTeacher("교사 2")] : active.coTeachers;
+    patchSubject(active.id, { coTeaching: on, coTeachers: teachers, topicMode: on ? false : active.topicMode });
+  };
+
+  const patchTopics = (topics) => patchSubject(active.id, { topics });
+  const addTopic = () => { const list = active.topics || []; if (list.length >= 8) return; patchTopics([...list, newTopic(`주제 ${list.length + 1}`)]); };
+  const removeTopic = (tid) => patchTopics((active.topics || []).filter((t) => t.id !== tid));
+  const patchTopic = (tid, p) => patchTopics((active.topics || []).map((t) => (t.id === tid ? { ...t, ...p } : t)));
+  const patchTopicLevel = (tid, level, text) =>
+    patchTopics((active.topics || []).map((t) => (t.id === tid ? { ...t, levels: { ...t.levels, [level]: text } } : t)));
+  const toggleTopicMode = () => {
+    const on = !active.topicMode;
+    const topics = on && (active.topics || []).length === 0 ? [newTopic("주제 1")] : active.topics;
+    patchSubject(active.id, { topicMode: on, topics, coTeaching: on ? false : active.coTeaching });
+  };
+
   const genStudent = async (sid, stid) => {
     const sub = ref.current.find((s) => s.id === sid); if (!sub) return;
+    if (sub.coTeaching || sub.topicMode) return; // 공동 교과·활동 주제별은 직접 입력/선택 → AI 생성 미사용
     const st = sub.students.find((x) => x.id === stid); if (!st) return;
     patchStudent(sid, stid, { status: "loading", error: null });
     try {
-      const prompt = buildSubjectPrompt({ subject: sub, student: st, byteMode });
+      const prompt = buildSubjectPrompt({ subject: sub, student: st, byteMode, guidelines });
       const text = await generateText(prompt, apiKeyOverride, maxTokensFor(sub.byteLimit));
       patchStudent(sid, stid, { result: text, status: "done" });
     } catch (e) { patchStudent(sid, stid, { status: "error", error: e.message || "생성 실패" }); }
@@ -652,7 +858,72 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
             <input type="number" value={active.byteLimit} min={0} step={100} onChange={(e) => patchSubject(active.id, { byteLimit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
             <span className="text-slate-400 text-xs">바이트</span>
           </label>
+          <label className="flex items-center gap-2 text-sm" title="한 과목을 여러 교사가 단원별로 나눠 가르칠 때">
+            <input type="checkbox" checked={active.coTeaching} onChange={toggleCoTeaching} className="h-4 w-4 accent-teal-600" />
+            <span className="text-slate-600">공동 교과 <span className="text-slate-400 text-xs">(단원 분담·자동 합산)</span></span>
+          </label>
+          <label className="flex items-center gap-2 text-sm" title="주제별로 수준(주도적~미흡) 내용을 미리 만들어두고 학생마다 선택">
+            <input type="checkbox" checked={active.topicMode} onChange={toggleTopicMode} className="h-4 w-4 accent-teal-600" />
+            <span className="text-slate-600">활동 주제별 <span className="text-slate-400 text-xs">(수준별 선택·자동 기록)</span></span>
+          </label>
         </div>
+
+        {active.topicMode && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-xs font-semibold text-teal-700">활동 주제 뱅크 <span className="font-normal text-slate-400">(주제마다 수준별 내용을 미리 작성 → 학생별로 수준만 선택)</span></div>
+              <button onClick={addTopic} disabled={(active.topics || []).length >= 8} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:border-teal-400 disabled:opacity-50"><Plus size={12} /> 주제 추가</button>
+            </div>
+            <div className="space-y-2.5">
+              {(active.topics || []).map((t, ti) => (
+                <div key={t.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="flex h-5 w-5 items-center justify-center rounded bg-teal-100 text-[11px] font-bold text-teal-700">{ti + 1}</span>
+                    <input value={t.name} onChange={(e) => patchTopic(t.id, { name: e.target.value })} placeholder={`활동 주제 ${ti + 1} (예: 2차전지 탐구)`} className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
+                    {(active.topics || []).length > 1 && <button onClick={() => removeTopic(t.id)} className="text-slate-300 hover:text-red-500"><X size={14} /></button>}
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {LEVELS.map((lv) => (
+                      <div key={lv}>
+                        <div className="mb-0.5 text-[11px] font-medium text-slate-500">{lv} 수준 문구</div>
+                        <textarea value={t.levels?.[lv] || ""} onChange={(e) => patchTopicLevel(t.id, lv, e.target.value)} rows={2}
+                          placeholder={`${lv} 수준에서 기록할 내용`} spellCheck
+                          className="w-full resize-none rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-teal-500 focus:outline-none" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-slate-400">학생 목록에서 주제별 수준을 고르면, 고른 수준의 문구가 순서대로 자동 기록됩니다. '해당 없음'은 제외돼요.</p>
+          </div>
+        )}
+
+        {active.coTeaching && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-xs font-semibold text-teal-700">담당 교사 <span className="font-normal text-slate-400">(교사별 글자수 제한 · 학생마다 교사별로 입력)</span></div>
+              <button onClick={addTeacher} disabled={(active.coTeachers || []).length >= 4} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:border-teal-400 disabled:opacity-50"><Plus size={12} /> 교사 추가</button>
+            </div>
+            <div className="space-y-1.5">
+              {(active.coTeachers || []).map((t, ti) => (
+                <div key={t.id} className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded bg-teal-100 text-[11px] font-bold text-teal-700">{ti + 1}</span>
+                  <input value={t.name} onChange={(e) => patchTeacher(t.id, { name: e.target.value })} placeholder={`교사 ${ti + 1} 이름/단원`} className="w-44 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
+                  <label className="flex items-center gap-1 text-xs text-slate-500">
+                    제한
+                    <input type="number" value={t.limit} min={0} step={100} onChange={(e) => patchTeacher(t.id, { limit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
+                    바이트
+                  </label>
+                  {(active.coTeachers || []).length > 1 && (
+                    <button onClick={() => removeTeacher(t.id)} className="text-slate-300 hover:text-red-500"><X size={14} /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-slate-400">교사별 입력 내용이 있는 것만 빈 칸 1칸으로 자동 합쳐집니다. 공동 교과에서는 AI 생성 대신 교사가 직접 입력해요.</p>
+          </div>
+        )}
 
         <div className="mt-3 border-t border-slate-100 pt-3">
           <div className="text-xs font-semibold text-teal-700 mb-1.5">{isNcs ? "능력단위·수행준거" : "성취기준"} <span className="font-normal text-slate-400">(선택 · 한 번 입력 후 25명 공통)</span></div>
@@ -692,9 +963,11 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <button onClick={addStudent} disabled={active.students.length >= MAX_SUB_STUDENTS} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-teal-400 disabled:opacity-50"><Plus size={15} /> 학생 추가</button>
         <button onClick={() => setBulkOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-teal-400"><ListPlus size={15} /> 이름 일괄 추가</button>
-        <button onClick={genAll} disabled={busyAll || !keyConfigured} className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">
-          {busyAll ? <Loader2 size={15} className="animate-spin" /> : <Users size={15} />}{busyAll ? "생성 중…" : "이 과목 전체 생성"}
-        </button>
+        {!active.coTeaching && !active.topicMode && (
+          <button onClick={genAll} disabled={busyAll || !keyConfigured} className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">
+            {busyAll ? <Loader2 size={15} className="animate-spin" /> : <Users size={15} />}{busyAll ? "생성 중…" : "이 과목 전체 생성"}
+          </button>
+        )}
         <button onClick={exportExcel} disabled={doneCount === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"><FileSpreadsheet size={15} /> 엑셀 저장(전 과목)</button>
         <span className="ml-auto text-xs text-slate-400">{active.students.length}/{MAX_SUB_STUDENTS}명</span>
       </div>
@@ -713,9 +986,148 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
       <div className="space-y-2.5">
         {active.students.map((st, i) => (
           <SubjectStudentRow key={st.id} st={st} idx={i} byteMode={byteMode} byteLimit={active.byteLimit}
+            coTeaching={active.coTeaching} coTeachers={active.coTeachers || []}
+            topicMode={active.topicMode} topics={active.topics || []}
             onChange={(p) => patchStudent(active.id, st.id, p)} onRemove={() => removeStudent(st.id)} onGenerate={() => genStudent(active.id, st.id)} />
         ))}
       </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   최소성취 대상학생 체크 탭
+   - 명단을 만든 뒤(직접/일괄), 최소성취 수준 이하 '대상' 학생을 체크
+   - 학번을 쉼표·공백·줄바꿈으로 입력하면 여러 명을 한 번에 자동 체크
+     (명단에 없는 학번은 새 행으로 추가하며 체크)
+   - 대상자만 추려 새 시트(엑셀)로 저장
+   ============================================================ */
+const newMinStudent = (number = "", name = "") => ({ id: uid(), number, name, target: false });
+
+function MinAchievementTab() {
+  const [students, setStudents] = useState([newMinStudent("1")]);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [numInput, setNumInput] = useState("");
+
+  const patch = (id, p) => setStudents((prev) => prev.map((s) => (s.id === id ? { ...s, ...p } : s)));
+  const addStudent = () => setStudents((p) => [...p, newMinStudent(String(p.length + 1))]);
+  const removeStudent = (id) => setStudents((p) => (p.length === 1 ? [newMinStudent("1")] : p.filter((s) => s.id !== id)));
+
+  const applyBulk = () => {
+    const lines = bulkText.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) { setBulkOpen(false); return; }
+    setStudents((prev) => {
+      const base = prev.filter((s) => s.number || s.name || s.target);
+      const start = base.length;
+      const add = lines.map((line, i) => {
+        const m = line.match(/^(\d+)[\s.\)-]+(.+)$/); // "3 김민준" / "3. 김민준" / "3) 김민준"
+        if (m) return newMinStudent(m[1], m[2].trim());
+        if (/^\d+$/.test(line)) return newMinStudent(line, "");
+        return newMinStudent(String(start + i + 1), line);
+      });
+      return [...base, ...add];
+    });
+    setBulkText(""); setBulkOpen(false);
+  };
+
+  const applyNumbers = () => {
+    const nums = Array.from(new Set(numInput.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean)));
+    if (!nums.length) return;
+    const numSet = new Set(nums.map(String));
+    setStudents((prev) => {
+      const existing = new Set(prev.map((s) => String(s.number)));
+      const out = prev.map((s) => (numSet.has(String(s.number)) ? { ...s, target: true } : s));
+      const missing = nums.filter((n) => !existing.has(String(n))).sort((a, b) => Number(a) - Number(b));
+      return [...out, ...missing.map((n) => ({ ...newMinStudent(n, ""), target: true }))];
+    });
+    setNumInput("");
+  };
+
+  const clearTargets = () => setStudents((prev) => prev.map((s) => ({ ...s, target: false })));
+
+  const targets = students.filter((s) => s.target);
+  const exportExcel = () => {
+    const rows = targets
+      .slice()
+      .sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0))
+      .map((s) => ({ "번호": s.number || "", "이름": s.name || "", "구분": "최소성취 대상" }));
+    if (!rows.length) return;
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [{ wch: 8 }, { wch: 14 }, { wch: 16 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "최소성취대상");
+    XLSX.writeFile(wb, `최소성취대상_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  return (
+    <div>
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-1.5 text-xs font-semibold text-rose-700 flex items-center gap-1.5"><Hash size={13} /> 학번으로 한 번에 체크</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={numInput} onChange={(e) => setNumInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") applyNumbers(); }}
+            placeholder="예: 3, 7, 12  또는  3 7 12 (쉼표·공백 구분)"
+            className="min-w-[220px] flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-rose-500 focus:outline-none" />
+          <button onClick={applyNumbers} className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700"><Check size={15} /> 대상 체크</button>
+        </div>
+        <p className="mt-1.5 text-xs text-slate-400">입력한 학번을 대상으로 표시합니다. 명단에 없는 학번은 새 행으로 추가돼요.</p>
+      </div>
+
+      {/* 툴바 */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button onClick={addStudent} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-rose-400"><Plus size={15} /> 학생 추가</button>
+        <button onClick={() => setBulkOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-rose-400"><ListPlus size={15} /> 명단 일괄 추가</button>
+        <button onClick={clearTargets} disabled={!targets.length} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-slate-400 disabled:opacity-50"><RefreshCw size={15} /> 체크 초기화</button>
+        <button onClick={exportExcel} disabled={!targets.length} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"><Download size={15} /> 대상자 엑셀 저장</button>
+        <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-sm font-semibold text-rose-700"><Flag size={14} /> 대상 {targets.length}명 / 전체 {students.length}명</span>
+      </div>
+
+      {bulkOpen && (
+        <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium text-slate-700">한 줄에 한 명 · "번호 이름" 또는 "이름"</span>
+            <button onClick={() => setBulkOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+          </div>
+          <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={5} placeholder={"1 김민준\n2 이서연\n3 박지후"} className="w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-rose-500 focus:outline-none" />
+          <div className="mt-2 flex justify-end"><button onClick={applyBulk} className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700">추가하기</button></div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-[420px] text-sm">
+          <thead><tr className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+            <th className="w-16 px-3 py-2">대상</th><th className="w-20 px-3 py-2">번호</th><th className="px-3 py-2">이름</th><th className="w-12 px-3 py-2"></th>
+          </tr></thead>
+          <tbody>
+            {students.map((s) => (
+              <tr key={s.id} className={`border-b border-slate-100 ${s.target ? "bg-rose-50" : ""}`}>
+                <td className="px-3 py-2">
+                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                    <input type="checkbox" checked={s.target} onChange={(e) => patch(s.id, { target: e.target.checked })} className="h-4 w-4 accent-rose-600" />
+                  </label>
+                </td>
+                <td className="px-3 py-2"><input value={s.number} onChange={(e) => patch(s.id, { number: e.target.value })} placeholder="번호" className="w-14 rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-rose-500 focus:outline-none" /></td>
+                <td className="px-3 py-2"><input value={s.name} onChange={(e) => patch(s.id, { name: e.target.value })} placeholder="이름" className="w-full max-w-[200px] rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-rose-500 focus:outline-none" /></td>
+                <td className="px-3 py-2"><button onClick={() => removeStudent(s.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={15} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {targets.length > 0 && (
+        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3">
+          <div className="mb-1.5 text-xs font-semibold text-rose-700 flex items-center gap-1.5"><Flag size={13} /> 최소성취 대상 학생 ({targets.length}명)</div>
+          <div className="flex flex-wrap gap-1.5">
+            {targets.slice().sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0)).map((s) => (
+              <span key={s.id} className="inline-flex items-center gap-1 rounded-full border border-rose-300 bg-white px-2.5 py-1 text-xs text-rose-700">
+                {s.number && <span className="font-semibold">{s.number}</span>}{s.name || "(이름 미입력)"}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -725,7 +1137,11 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
    ============================================================ */
 const IS_DIST = import.meta.env.VITE_DIST === "1"; // 배포용 빌드 표시(키 미포함)
 const KEY_STORE = "saenggibu_gemini_key";
+const GUIDE_STORE = "saenggibu_guidelines";
+const GUIDE_ON_STORE = "saenggibu_guidelines_on";
 const readStoredKey = () => { try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; } };
+const readStoredGuide = () => { try { return localStorage.getItem(GUIDE_STORE) || GUIDELINES_DEFAULT; } catch { return GUIDELINES_DEFAULT; } };
+const readGuideOn = () => { try { return localStorage.getItem(GUIDE_ON_STORE) !== "0"; } catch { return true; } };
 
 export default function App() {
   const [mainTab, setMainTab] = useState("behavior");
@@ -734,6 +1150,11 @@ export default function App() {
   const [rememberKey, setRememberKey] = useState(() => !!readStoredKey());
   const [showKey, setShowKey] = useState(() => IS_DIST && !readStoredKey());
 
+  // 생기부 작성요령(기본 숨김 · 원하면 열어서 확인/편집)
+  const [guidelines, setGuidelines] = useState(readStoredGuide);
+  const [useGuidelines, setUseGuidelines] = useState(readGuideOn);
+  const [showGuide, setShowGuide] = useState(false);
+
   // 키를 이 브라우저에 저장(선택). 끄면 저장본을 지우고 새로고침 시 사라짐.
   useEffect(() => {
     try {
@@ -741,6 +1162,12 @@ export default function App() {
       else localStorage.removeItem(KEY_STORE);
     } catch {}
   }, [apiKeyOverride, rememberKey]);
+
+  // 작성요령·사용여부 저장
+  useEffect(() => { try { localStorage.setItem(GUIDE_STORE, guidelines); } catch {} }, [guidelines]);
+  useEffect(() => { try { localStorage.setItem(GUIDE_ON_STORE, useGuidelines ? "1" : "0"); } catch {} }, [useGuidelines]);
+
+  const activeGuidelines = useGuidelines ? guidelines : "";
 
   const keyConfigured = (() => {
     const k = apiKeyOverride || AI_CONFIG.gemini.apiKey;
@@ -764,6 +1191,15 @@ export default function App() {
           )}
         </header>
 
+        {/* 상단 주의 박스 */}
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800">
+          <ShieldCheck size={16} className="mt-0.5 shrink-0" />
+          <div>
+            입력한 내용은 <b>별도 서버에 저장되지 않아요.</b> 이 브라우저 안에서 처리되고 문장 생성을 위해 AI(구글)로만 전송되니, 자료가 유출될 일은 <b>생기지 않습니다.</b>
+            <span className="mt-0.5 block text-xs text-emerald-600">다만 작성에 꼭 필요한 관찰 내용만 넣고, 주민번호·연락처 등 민감정보는 입력하지 마세요.</span>
+          </div>
+        </div>
+
         {/* 메인 탭 */}
         <div className="mb-4 flex gap-2">
           <button onClick={() => setMainTab("behavior")}
@@ -773,6 +1209,10 @@ export default function App() {
           <button onClick={() => setMainTab("subject")}
             className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${mainTab === "subject" ? "bg-teal-600 text-white shadow-sm" : "bg-white text-slate-600 border border-slate-200 hover:border-teal-300"}`}>
             <BookOpen size={16} /> 세부능력 및 특기사항
+          </button>
+          <button onClick={() => setMainTab("minach")}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${mainTab === "minach" ? "bg-rose-600 text-white shadow-sm" : "bg-white text-slate-600 border border-slate-200 hover:border-rose-300"}`}>
+            <Flag size={16} /> 최소성취 대상
           </button>
         </div>
 
@@ -800,25 +1240,69 @@ export default function App() {
             </div>
             <span className="text-xs text-slate-400">{byteMode === 3 ? "현재 NEIS 기준" : "옛 기준"}</span>
           </label>
-          <button onClick={() => setShowKey((v) => !v)} className="ml-auto inline-flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-600"><KeyRound size={13} /> 키 입력</button>
+          <div className="ml-auto flex items-center gap-3">
+            <button onClick={() => setShowGuide((v) => !v)} className={`inline-flex items-center gap-1 text-xs hover:text-indigo-600 ${useGuidelines ? "text-indigo-600" : "text-slate-500"}`}>
+              <BookOpen size={13} /> 작성요령 {useGuidelines ? "(적용 중)" : "(미적용)"}
+            </button>
+            <button onClick={() => setShowKey((v) => !v)} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-600"><KeyRound size={13} /> 키 입력</button>
+          </div>
+          {showGuide && (
+            <div className="w-full space-y-2 border-t border-slate-100 pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-indigo-700 flex items-center gap-1.5"><BookOpen size={13} /> 생기부 작성요령 (AI 생성의 기준)</div>
+                <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                  <input type="checkbox" checked={useGuidelines} onChange={(e) => setUseGuidelines(e.target.checked)} className="h-4 w-4 accent-indigo-600" />
+                  AI 생성 시 이 작성요령을 기준으로 반영
+                </label>
+              </div>
+              <p className="text-xs text-slate-400">기본은 <b>2026학년도 일반 작성 원칙 요약본</b>입니다. 학교/교육청 공식 기재요령 문구로 바꿔 붙여넣으면 그 기준으로 생성됩니다. (평소엔 숨겨져 있어요)</p>
+              <textarea value={guidelines} onChange={(e) => setGuidelines(e.target.value)} rows={10}
+                className="w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-xs leading-relaxed focus:border-indigo-500 focus:outline-none" spellCheck={false} />
+              <div className="flex items-center justify-end gap-2">
+                <button onClick={() => setGuidelines(GUIDELINES_DEFAULT)} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:border-indigo-400"><RefreshCw size={12} /> 기본값으로 초기화</button>
+              </div>
+            </div>
+          )}
           {showKey && (
-            <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 border-t border-slate-100 pt-2">
-              <input type="password" value={apiKeyOverride} onChange={(e) => setApiKeyOverride(e.target.value)} placeholder="Gemini API 키 붙여넣기 (aistudio.google.com/apikey)" className="min-w-[200px] flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
-              <span className={`text-xs ${keyConfigured ? "text-emerald-600" : "text-slate-400"}`}>{keyConfigured ? "● 사용 가능" : "○ 미설정"}</span>
-              <label className="inline-flex items-center gap-1.5 text-xs text-slate-500" title="끄면 새로고침 시 키가 사라집니다">
-                <input type="checkbox" checked={rememberKey} onChange={(e) => setRememberKey(e.target.checked)} className="accent-indigo-600" /> 이 브라우저에 저장
-              </label>
-              {apiKeyOverride && <button onClick={() => setApiKeyOverride("")} className="text-xs text-slate-400 hover:text-red-500">지우기</button>}
+            <div className="w-full space-y-2 border-t border-slate-100 pt-2">
+              {/* 키 입력 가이드 */}
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 p-3 text-xs text-slate-600">
+                <div className="mb-1.5 flex items-center gap-1.5 font-semibold text-indigo-700"><KeyRound size={13} /> Gemini API 키 발급·입력 방법</div>
+                <ol className="list-decimal space-y-1 pl-4 leading-relaxed">
+                  <li>
+                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-0.5 font-medium text-indigo-600 underline hover:text-indigo-700">
+                      Google AI Studio 키 발급 페이지 <ExternalLink size={11} />
+                    </a>{" "}열기 (구글 계정 로그인)
+                  </li>
+                  <li><b>Create API key</b>(API 키 만들기) 클릭 → 프로젝트 선택/생성하면 <code className="rounded bg-white px-1">AIza…</code>로 시작하는 키가 만들어집니다.</li>
+                  <li>키 오른쪽 <b>복사</b> 버튼을 눌러 복사합니다.</li>
+                  <li>아래 칸에 <b>붙여넣기</b>(Ctrl/⌘+V) → 오른쪽에 <span className="text-emerald-600 font-medium">● 사용 가능</span>이 뜨면 완료!</li>
+                  <li>같은 브라우저에서 계속 쓰려면 <b>‘이 브라우저에 저장’</b>을 체크하세요(다음에 다시 입력 안 해도 됩니다).</li>
+                </ol>
+                <p className="mt-1.5 text-[11px] text-slate-400">키는 구글(생성 요청)로만 전송되고 별도 서버에 저장되지 않아요. 무료 등급으로도 충분히 사용할 수 있습니다.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <input type="password" value={apiKeyOverride} onChange={(e) => setApiKeyOverride(e.target.value)} placeholder="여기에 Gemini API 키 붙여넣기 (AIza… 로 시작)" className="min-w-[200px] flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
+                <span className={`text-xs ${keyConfigured ? "text-emerald-600" : "text-slate-400"}`}>{keyConfigured ? "● 사용 가능" : "○ 미설정"}</span>
+                <label className="inline-flex items-center gap-1.5 text-xs text-slate-500" title="끄면 새로고침 시 키가 사라집니다">
+                  <input type="checkbox" checked={rememberKey} onChange={(e) => setRememberKey(e.target.checked)} className="accent-indigo-600" /> 이 브라우저에 저장
+                </label>
+                {apiKeyOverride && <button onClick={() => setApiKeyOverride("")} className="text-xs text-slate-400 hover:text-red-500">지우기</button>}
+              </div>
             </div>
           )}
         </div>
 
         {/* 탭 본문 (둘 다 마운트 유지 → 전환해도 입력 보존) */}
         <div className={mainTab === "behavior" ? "" : "hidden"}>
-          <BehaviorTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} />
+          <BehaviorTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} />
         </div>
         <div className={mainTab === "subject" ? "" : "hidden"}>
-          <SubjectTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} />
+          <SubjectTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} />
+        </div>
+        <div className={mainTab === "minach" ? "" : "hidden"}>
+          <MinAchievementTab />
         </div>
 
         <footer className="mt-6 text-center text-xs text-slate-400">

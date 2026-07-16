@@ -1,0 +1,44 @@
+name: Deploy to GitHub Pages
+
+# main 에 푸시하면 배포용 빌드(build:dist, 키 미포함)를 만들어 GitHub Pages 로 배포합니다.
+# Actions 탭에서 수동 실행(workflow_dispatch)도 가능합니다.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 동시에 여러 배포가 겹치지 않도록
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # 키를 강제로 비운 배포용 단일 HTML → dist-deploy/index.html
+      - run: npm run build:dist
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-deploy
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
