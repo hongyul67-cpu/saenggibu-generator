@@ -17,16 +17,21 @@ const AI_CONFIG = {
     // 키는 프로젝트 루트의 .env.local 에 VITE_GEMINI_API_KEY 로 넣습니다(절대 커밋되지 않음).
     // .env.local 이 없으면 아래 플레이스홀더가 쓰여 '미설정' 상태가 됩니다.
     apiKey: import.meta.env.VITE_GEMINI_API_KEY || "YOUR_GEMINI_API_KEY",
-    model: "gemini-2.5-flash",          // 대안: "gemini-2.0-flash"
+    // 항상 최신 Flash 계열로 자동 연결되는 별칭. 구글이 버전을 올려도 최신을 따라감.
+    // 특정 모델이 막히면 화면의 '모델' 칸에서 다른 값으로 교체 가능.
+    model: "gemini-flash-latest",
   },
 };
+// 화면 선택용 후보 모델(위에서부터 최신·권장). 목록에 없어도 직접 입력 가능.
+const GEMINI_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
 
 async function callGemini(prompt, apiKey, model, maxTokens) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const generationConfig = { temperature: 0.7, maxOutputTokens: maxTokens || 1024 };
-  // gemini-2.5 계열은 추론(thinking) 모델이라, 끄지 않으면 사고 과정이 본문에 섞이거나
-  // 토큰을 소진해 빈 응답이 나올 수 있음 → 비활성화. (다른 모델엔 미지원 필드라 조건부 적용)
-  if (/2\.5/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  // gemini-2.5/최신(latest) Flash 계열은 추론(thinking) 모델이라, 끄지 않으면 사고 과정이
+  // 본문에 섞이거나 토큰을 소진해 빈 응답이 나올 수 있음 → 비활성화.
+  // (thinking 미지원 모델엔 넣지 않도록 조건부 적용: 2.0/1.5 등 제외)
+  if (/2\.5|latest/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -46,14 +51,14 @@ async function callGemini(prompt, apiKey, model, maxTokens) {
 }
 
 const aiProviders = {
-  gemini: (prompt, keyOverride, maxTokens) =>
-    callGemini(prompt, keyOverride || AI_CONFIG.gemini.apiKey, AI_CONFIG.gemini.model, maxTokens),
+  gemini: (prompt, keyOverride, maxTokens, modelOverride) =>
+    callGemini(prompt, keyOverride || AI_CONFIG.gemini.apiKey, modelOverride || AI_CONFIG.gemini.model, maxTokens),
 };
 
-async function generateText(prompt, keyOverride, maxTokens) {
+async function generateText(prompt, keyOverride, maxTokens, modelOverride) {
   const fn = aiProviders[AI_CONFIG.provider];
   if (!fn) throw new Error(`알 수 없는 provider: ${AI_CONFIG.provider}`);
-  return fn(prompt, keyOverride, maxTokens);
+  return fn(prompt, keyOverride, maxTokens, modelOverride);
 }
 
 /* ============================================================
@@ -412,7 +417,7 @@ function TeacherPerspective({ checks, etc, onChecks, onEtc }) {
 /* ============================================================
    행특 탭
    ============================================================ */
-function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines }) {
+function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model }) {
   const [track, setTrack] = useState("tech");
   const [grade, setGrade] = useState(1);
   const [byteLimit, setByteLimit] = useState(1500);
@@ -443,7 +448,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines }) {
       const checks = s.checks.filter((c) => valid.has(c));
       const teacher = joinList(teacherChecks, teacherEtc);
       const prompt = buildBehaviorPrompt({ track, grade, checks, memo: s.memo, byteLimit, byteMode, teacher, guidelines });
-      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(byteLimit));
+      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(byteLimit), model);
       patch(id, { result: text, status: "done" });
     } catch (e) { patch(id, { status: "error", error: e.message || "생성 실패" }); }
   };
@@ -701,7 +706,7 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
   );
 }
 
-function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines }) {
+function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model }) {
   const [subjects, setSubjects] = useState([newSubject("과목 1")]);
   const [activeId, setActiveId] = useState(subjects[0].id);
   const [busyAll, setBusyAll] = useState(false);
@@ -764,7 +769,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines }) {
     patchStudent(sid, stid, { status: "loading", error: null });
     try {
       const prompt = buildSubjectPrompt({ subject: sub, student: st, byteMode, guidelines });
-      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(sub.byteLimit));
+      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(sub.byteLimit), model);
       patchStudent(sid, stid, { result: text, status: "done" });
     } catch (e) { patchStudent(sid, stid, { status: "error", error: e.message || "생성 실패" }); }
   };
@@ -1137,9 +1142,11 @@ function MinAchievementTab() {
    ============================================================ */
 const IS_DIST = import.meta.env.VITE_DIST === "1"; // 배포용 빌드 표시(키 미포함)
 const KEY_STORE = "saenggibu_gemini_key";
+const MODEL_STORE = "saenggibu_gemini_model";
 const GUIDE_STORE = "saenggibu_guidelines";
 const GUIDE_ON_STORE = "saenggibu_guidelines_on";
 const readStoredKey = () => { try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; } };
+const readStoredModel = () => { try { return localStorage.getItem(MODEL_STORE) || AI_CONFIG.gemini.model; } catch { return AI_CONFIG.gemini.model; } };
 const readStoredGuide = () => { try { return localStorage.getItem(GUIDE_STORE) || GUIDELINES_DEFAULT; } catch { return GUIDELINES_DEFAULT; } };
 const readGuideOn = () => { try { return localStorage.getItem(GUIDE_ON_STORE) !== "0"; } catch { return true; } };
 
@@ -1149,6 +1156,7 @@ export default function App() {
   const [apiKeyOverride, setApiKeyOverride] = useState(readStoredKey);
   const [rememberKey, setRememberKey] = useState(() => !!readStoredKey());
   const [showKey, setShowKey] = useState(() => IS_DIST && !readStoredKey());
+  const [model, setModel] = useState(readStoredModel);
 
   // 생기부 작성요령(기본 숨김 · 원하면 열어서 확인/편집)
   const [guidelines, setGuidelines] = useState(readStoredGuide);
@@ -1162,6 +1170,9 @@ export default function App() {
       else localStorage.removeItem(KEY_STORE);
     } catch {}
   }, [apiKeyOverride, rememberKey]);
+
+  // 모델 저장(빈 값이면 기본값 사용)
+  useEffect(() => { try { localStorage.setItem(MODEL_STORE, model || AI_CONFIG.gemini.model); } catch {} }, [model]);
 
   // 작성요령·사용여부 저장
   useEffect(() => { try { localStorage.setItem(GUIDE_STORE, guidelines); } catch {} }, [guidelines]);
@@ -1290,16 +1301,32 @@ export default function App() {
                 </label>
                 {apiKeyOverride && <button onClick={() => setApiKeyOverride("")} className="text-xs text-slate-400 hover:text-red-500">지우기</button>}
               </div>
+              {/* 모델 선택(고급) — 구글이 모델을 바꾸면 여기서 교체 */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                  모델
+                  <input list="gemini-model-list" value={model} onChange={(e) => setModel(e.target.value)}
+                    placeholder={AI_CONFIG.gemini.model}
+                    className="w-56 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none" />
+                  <datalist id="gemini-model-list">
+                    {GEMINI_MODELS.map((m) => <option key={m} value={m} />)}
+                  </datalist>
+                </label>
+                {model !== AI_CONFIG.gemini.model && (
+                  <button onClick={() => setModel(AI_CONFIG.gemini.model)} className="text-xs text-slate-400 hover:text-indigo-600">기본값({AI_CONFIG.gemini.model})</button>
+                )}
+                <span className="text-[11px] text-slate-400">‘모델을 쓸 수 없다’는 404가 나면 목록에서 다른 모델로 바꿔 보세요.</span>
+              </div>
             </div>
           )}
         </div>
 
         {/* 탭 본문 (둘 다 마운트 유지 → 전환해도 입력 보존) */}
         <div className={mainTab === "behavior" ? "" : "hidden"}>
-          <BehaviorTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} />
+          <BehaviorTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} model={model} />
         </div>
         <div className={mainTab === "subject" ? "" : "hidden"}>
-          <SubjectTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} />
+          <SubjectTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} model={model} />
         </div>
         <div className={mainTab === "minach" ? "" : "hidden"}>
           <MinAchievementTab />
