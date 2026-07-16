@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   Plus, Trash2, Sparkles, Download, Copy, Check, AlertTriangle, Users, Loader2,
-  Table, LayoutGrid, KeyRound, FileSpreadsheet, RefreshCw, X, ListPlus, BookOpen, ClipboardList
+  Table, LayoutGrid, KeyRound, FileSpreadsheet, RefreshCw, X, ListPlus, BookOpen, ClipboardList, ShieldCheck
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -248,6 +248,59 @@ function CopyBtn({ text }) {
   );
 }
 
+/* 제한 초과 시 보여줄 재치있는 안내 문구 (필드마다 다른 문구가 나오도록 seed로 선택) */
+const OVER_MESSAGES = [
+  "그만 입력하라니까요… 😤 여기서 더 늘리면 NEIS가 거부해요.",
+  "칸이 꽉 찼어요! 이제 늘릴 게 아니라 덜어낼 시간입니다 ✂️",
+  "제한 초과! 명문(名文)은 짧을수록 빛나는 법이죠 ✨",
+  "여기서 한 글자만 더 넣으면… 저장이 안 돼요! 🙅",
+];
+function pickOverMessage(seed = "") {
+  let h = 0;
+  for (const c of String(seed)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return OVER_MESSAGES[h % OVER_MESSAGES.length];
+}
+
+/* ============================================================
+   바이트 제한 입력창
+   - 입력 중 바이트수를 실시간 표시
+   - 제한 초과 상태에서 '더 늘리는' 입력은 차단(삭제·수정, AI 결과 세팅은 허용)
+   - 초과 시 테두리·배경을 빨간색으로, 재치있는 안내 문구 표시
+   ============================================================ */
+function LimitedTextarea({ value, onChange, limit, byteMode, rows = 4, placeholder, accent = "indigo", seed = "" }) {
+  const bytes = countBytes(value, byteMode);
+  const over = limit > 0 && bytes > limit;
+  const handle = (e) => {
+    const next = e.target.value;
+    // 이미 제한을 넘겼거나 넘기게 되는데도 '더 늘리는' 입력이면 무시(줄이는 편집은 항상 허용)
+    if (limit > 0) {
+      const nb = countBytes(next, byteMode);
+      if (nb > limit && nb > bytes) return;
+    }
+    onChange(next);
+  };
+  const focusCls = accent === "teal" ? "focus:border-teal-500" : "focus:border-indigo-500";
+  return (
+    <div>
+      <textarea
+        value={value}
+        onChange={handle}
+        rows={rows}
+        placeholder={placeholder}
+        spellCheck
+        className={`w-full resize-none rounded-md border px-3 py-2 text-sm leading-relaxed focus:outline-none transition-colors ${
+          over ? "border-red-400 bg-red-50 text-red-900 focus:border-red-500" : `border-slate-200 bg-white ${focusCls}`
+        }`}
+      />
+      {over && (
+        <div className="mt-1 flex items-start gap-1.5 rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-600">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {pickOverMessage(seed)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CheckGroups({ track, grade, checks, onToggle }) {
   const cats = useMemo(() => getCategories(track, grade), [track, grade]);
   const set = useMemo(() => new Set(checks), [checks]);
@@ -434,7 +487,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
       {view === "card" ? (
         <div className="space-y-3">
           {students.map((s, i) => {
-            const bytes = countBytes(s.result, byteMode), over = bytes > byteLimit;
+            const bytes = countBytes(s.result, byteMode);
             return (
               <div key={s.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-3">
@@ -455,8 +508,8 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
                 {s.error && <div className="mt-2 flex items-start gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-xs text-red-600"><AlertTriangle size={13} className="mt-0.5 shrink-0" /> {s.error}</div>}
                 {(s.result || s.status === "loading") && (
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <textarea value={s.result} onChange={(e) => patch(s.id, { result: e.target.value })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
-                      className={`w-full resize-none rounded-md border bg-white px-3 py-2 text-sm leading-relaxed focus:outline-none ${over ? "border-red-300 focus:border-red-500" : "border-slate-200 focus:border-indigo-500"}`} />
+                    <LimitedTextarea value={s.result} onChange={(v) => patch(s.id, { result: v })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
+                      limit={byteLimit} byteMode={byteMode} accent="indigo" seed={s.id} />
                     <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={s.result} /></div>
                   </div>
                 )}
@@ -477,7 +530,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
                   <tr key={s.id} className="border-b border-slate-100 align-top">
                     <td className="px-3 py-2"><input value={s.number} onChange={(e) => patch(s.id, { number: e.target.value })} placeholder={String(i + 1)} className="w-10 rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-indigo-500 focus:outline-none" /></td>
                     <td className="px-3 py-2"><input value={s.name} onChange={(e) => patch(s.id, { name: e.target.value })} placeholder="이름" className="w-20 rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-indigo-500 focus:outline-none" /></td>
-                    <td className="px-3 py-2"><textarea value={s.result} onChange={(e) => patch(s.id, { result: e.target.value })} rows={3} placeholder={s.status === "loading" ? "생성 중…" : "생성 또는 직접 입력"} className="w-full resize-none rounded border border-slate-200 px-2 py-1.5 text-sm leading-relaxed focus:border-indigo-500 focus:outline-none" /></td>
+                    <td className="px-3 py-2"><LimitedTextarea value={s.result} onChange={(v) => patch(s.id, { result: v })} rows={3} placeholder={s.status === "loading" ? "생성 중…" : "생성 또는 직접 입력"} limit={byteLimit} byteMode={byteMode} accent="indigo" seed={s.id} /></td>
                     <td className="px-3 py-2"><ByteGauge bytes={b} limit={byteLimit} /></td>
                     <td className="px-3 py-2"><button onClick={() => genOne(s.id)} disabled={s.status === "loading"} className="inline-flex items-center justify-center rounded-md bg-indigo-600 p-1.5 text-white hover:bg-indigo-700 disabled:opacity-50">{s.status === "loading" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}</button></td>
                   </tr>
@@ -495,7 +548,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
    세특 탭
    ============================================================ */
 function SubjectStudentRow({ st, idx, byteMode, byteLimit, onChange, onRemove, onGenerate }) {
-  const bytes = countBytes(st.result, byteMode), over = bytes > byteLimit;
+  const bytes = countBytes(st.result, byteMode);
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -514,8 +567,8 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, onChange, onRemove, o
       {st.error && <div className="mt-2 flex items-start gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-xs text-red-600"><AlertTriangle size={13} className="mt-0.5 shrink-0" /> {st.error}</div>}
       {(st.result || st.status === "loading") && (
         <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-          <textarea value={st.result} onChange={(e) => onChange({ result: e.target.value })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
-            className={`w-full resize-none rounded-md border bg-white px-3 py-2 text-sm leading-relaxed focus:outline-none ${over ? "border-red-300 focus:border-red-500" : "border-slate-200 focus:border-teal-500"}`} />
+          <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
+            limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id} />
           <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
         </div>
       )}
@@ -763,6 +816,15 @@ export default function App() {
             </span>
           )}
         </header>
+
+        {/* 상단 주의 박스 */}
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800">
+          <ShieldCheck size={16} className="mt-0.5 shrink-0" />
+          <div>
+            입력한 내용은 <b>별도 서버에 저장되지 않아요.</b> 이 브라우저 안에서 처리되고 문장 생성을 위해 AI(구글)로만 전송되니, 자료가 유출될 일은 <b>생기지 않습니다.</b>
+            <span className="mt-0.5 block text-xs text-emerald-600">다만 작성에 꼭 필요한 관찰 내용만 넣고, 주민번호·연락처 등 민감정보는 입력하지 마세요.</span>
+          </div>
+        </div>
 
         {/* 메인 탭 */}
         <div className="mb-4 flex gap-2">
