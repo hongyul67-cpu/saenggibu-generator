@@ -127,15 +127,57 @@ function joinList(arr, etc) {
 }
 
 /* ============================================================
+   생기부 작성요령 기준 데이터 (2026학년도 기준 · 일반 작성 원칙 요약)
+   - AI가 이 원칙을 근간으로 문장을 생성하도록 프롬프트에 주입합니다.
+   - 화면에서 편집·초기화할 수 있으며, 학교/교육청 공식 기재요령으로 교체해도 됩니다.
+   ============================================================ */
+const GUIDELINES_DEFAULT = `[학교생활기록부 작성요령 기준 (2026학년도 · 일반 원칙 요약)]
+
+■ 문체·형식
+- 문장 종결은 '~함', '~임', '~을 보임' 등 명사형(개조식)으로 통일한다.
+- 교사가 관찰한 제3자 시점으로 객관적·구체적으로 서술한다.
+- 학생 이름, 1인칭(저는/나는), 경어체(~했습니다)는 사용하지 않는다.
+
+■ 사실 기반·근거주의
+- 교사가 직접 관찰·확인한 사실과 근거자료에 기반하여 기재한다.
+- 추측, 과장, 미화, 근거 없는 칭찬은 지양하고 활동의 과정과 변화·성장을 중심으로 쓴다.
+- 제공되지 않은 수치·대회명·수상·기관명 등 확인되지 않은 사실은 지어내지 않는다.
+
+■ 기재 금지·유의 사항(매년 강조)
+- 교외 상, 교외 대회 실적, 각종 인증시험(공인 어학성적 등) 점수·자격은 기재하지 않는다.
+- 모의고사·전국연합학력평가 성적·석차, 특정 대학명·기관명은 기재하지 않는다.
+- 부모(보호자)의 사회·경제적 지위나 직업, 사교육을 유발하는 내용은 기재하지 않는다.
+- 논문·도서 출간, 발명특허, 해외 어학연수 등 학교 밖 실적은 기재하지 않는다.
+- 특정 종교·정치적으로 편향된 표현은 사용하지 않는다.
+
+■ 세부능력 및 특기사항(세특)
+- 교육과정 성취기준과 수업 중 학습·탐구 활동을 근거로, 그 학생만의 특성이 드러나게 쓴다.
+- 참여 수준에 따라 톤을 차등하되, 낮은 수준도 낙인 없이 기본 참여와 성장 가능성 위주로 절제하여 쓴다.
+
+■ 행동특성 및 종합의견(행특)
+- 학습·인성·진로 등을 총체적으로 종합하여 추천서 성격으로 기술한다.
+- 변화와 성장의 과정을 중심으로 하고, 보완할 점은 완곡하게 개선 노력·지도 방향 중심으로 쓴다.
+
+※ 위 내용은 일반 작성 원칙 요약본입니다. 세부 규정은 해당 연도 교육부·교육청 '학교생활기록부 기재요령'을 확인하세요.`;
+
+// 프롬프트에 넣을 작성요령 블록(과도한 길이 방지를 위해 그대로 삽입)
+function guidelineBlock(guidelines) {
+  const g = (guidelines || "").trim();
+  return g ? `${g}\n\n위 '학교생활기록부 작성요령 기준'을 반드시 준수하여 작성할 것.\n` : "";
+}
+
+/* ============================================================
    프롬프트 빌더
    ============================================================ */
-function buildBehaviorPrompt({ track, grade, checks, memo, byteLimit, byteMode, teacher }) {
+function buildBehaviorPrompt({ track, grade, checks, memo, byteLimit, byteMode, teacher, guidelines }) {
   const trackLabel = TRACK_LABELS[track];
   const strengths = checks.filter((c) => !NEGATIVE_SET.has(c));
   const improves = checks.filter((c) => NEGATIVE_SET.has(c));
   const L = [];
   L.push(`당신은 한국 고등학교 담임교사로서 학교생활기록부의 '행동특성 및 종합의견'을 작성하는 전문가입니다.`);
   L.push(`다음 정보를 바탕으로 한 학생의 행동특성 및 종합의견을 작성하세요.\n`);
+  const gb = guidelineBlock(guidelines);
+  if (gb) L.push(gb);
   L.push(`[학생 정보]`);
   L.push(`- 계열: ${trackLabel}`);
   L.push(`- 학년: ${grade}학년`);
@@ -161,7 +203,7 @@ function buildBehaviorPrompt({ track, grade, checks, memo, byteLimit, byteMode, 
   return L.join("\n");
 }
 
-function buildSubjectPrompt({ subject, student, byteMode }) {
+function buildSubjectPrompt({ subject, student, byteMode, guidelines }) {
   const { name, type, standard, activities, activityEtc, commonActivity, evalMemo, byteLimit } = subject;
   const isNcs = type === "ncs";
   const teacher = joinList(subject.teacherChecks, subject.teacherEtc);
@@ -169,6 +211,8 @@ function buildSubjectPrompt({ subject, student, byteMode }) {
   const L = [];
   L.push(`당신은 한국 고등학교 ${name ? `'${name}' ` : ""}교과 담당교사로서 학교생활기록부의 '세부능력 및 특기사항'을 작성하는 전문가입니다.`);
   L.push(`다음 정보를 바탕으로 한 학생의 세부능력 및 특기사항을 작성하세요.\n`);
+  const gb = guidelineBlock(guidelines);
+  if (gb) L.push(gb);
   L.push(`[과목 정보]`);
   if (name) L.push(`- 과목명: ${name}`);
   L.push(`- 과목 유형: ${isNcs ? "NCS 전문교과(직무·수행 중심)" : "일반 교과"}`);
@@ -368,7 +412,7 @@ function TeacherPerspective({ checks, etc, onChecks, onEtc }) {
 /* ============================================================
    행특 탭
    ============================================================ */
-function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
+function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines }) {
   const [track, setTrack] = useState("tech");
   const [grade, setGrade] = useState(1);
   const [byteLimit, setByteLimit] = useState(1500);
@@ -398,7 +442,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
       const valid = validItemSet(track, grade);
       const checks = s.checks.filter((c) => valid.has(c));
       const teacher = joinList(teacherChecks, teacherEtc);
-      const prompt = buildBehaviorPrompt({ track, grade, checks, memo: s.memo, byteLimit, byteMode, teacher });
+      const prompt = buildBehaviorPrompt({ track, grade, checks, memo: s.memo, byteLimit, byteMode, teacher, guidelines });
       const text = await generateText(prompt, apiKeyOverride, maxTokensFor(byteLimit));
       patch(id, { result: text, status: "done" });
     } catch (e) { patch(id, { status: "error", error: e.message || "생성 실패" }); }
@@ -657,7 +701,7 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
   );
 }
 
-function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
+function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines }) {
   const [subjects, setSubjects] = useState([newSubject("과목 1")]);
   const [activeId, setActiveId] = useState(subjects[0].id);
   const [busyAll, setBusyAll] = useState(false);
@@ -719,7 +763,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
     const st = sub.students.find((x) => x.id === stid); if (!st) return;
     patchStudent(sid, stid, { status: "loading", error: null });
     try {
-      const prompt = buildSubjectPrompt({ subject: sub, student: st, byteMode });
+      const prompt = buildSubjectPrompt({ subject: sub, student: st, byteMode, guidelines });
       const text = await generateText(prompt, apiKeyOverride, maxTokensFor(sub.byteLimit));
       patchStudent(sid, stid, { result: text, status: "done" });
     } catch (e) { patchStudent(sid, stid, { status: "error", error: e.message || "생성 실패" }); }
@@ -1093,7 +1137,11 @@ function MinAchievementTab() {
    ============================================================ */
 const IS_DIST = import.meta.env.VITE_DIST === "1"; // 배포용 빌드 표시(키 미포함)
 const KEY_STORE = "saenggibu_gemini_key";
+const GUIDE_STORE = "saenggibu_guidelines";
+const GUIDE_ON_STORE = "saenggibu_guidelines_on";
 const readStoredKey = () => { try { return localStorage.getItem(KEY_STORE) || ""; } catch { return ""; } };
+const readStoredGuide = () => { try { return localStorage.getItem(GUIDE_STORE) || GUIDELINES_DEFAULT; } catch { return GUIDELINES_DEFAULT; } };
+const readGuideOn = () => { try { return localStorage.getItem(GUIDE_ON_STORE) !== "0"; } catch { return true; } };
 
 export default function App() {
   const [mainTab, setMainTab] = useState("behavior");
@@ -1102,6 +1150,11 @@ export default function App() {
   const [rememberKey, setRememberKey] = useState(() => !!readStoredKey());
   const [showKey, setShowKey] = useState(() => IS_DIST && !readStoredKey());
 
+  // 생기부 작성요령(기본 숨김 · 원하면 열어서 확인/편집)
+  const [guidelines, setGuidelines] = useState(readStoredGuide);
+  const [useGuidelines, setUseGuidelines] = useState(readGuideOn);
+  const [showGuide, setShowGuide] = useState(false);
+
   // 키를 이 브라우저에 저장(선택). 끄면 저장본을 지우고 새로고침 시 사라짐.
   useEffect(() => {
     try {
@@ -1109,6 +1162,12 @@ export default function App() {
       else localStorage.removeItem(KEY_STORE);
     } catch {}
   }, [apiKeyOverride, rememberKey]);
+
+  // 작성요령·사용여부 저장
+  useEffect(() => { try { localStorage.setItem(GUIDE_STORE, guidelines); } catch {} }, [guidelines]);
+  useEffect(() => { try { localStorage.setItem(GUIDE_ON_STORE, useGuidelines ? "1" : "0"); } catch {} }, [useGuidelines]);
+
+  const activeGuidelines = useGuidelines ? guidelines : "";
 
   const keyConfigured = (() => {
     const k = apiKeyOverride || AI_CONFIG.gemini.apiKey;
@@ -1181,7 +1240,29 @@ export default function App() {
             </div>
             <span className="text-xs text-slate-400">{byteMode === 3 ? "현재 NEIS 기준" : "옛 기준"}</span>
           </label>
-          <button onClick={() => setShowKey((v) => !v)} className="ml-auto inline-flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-600"><KeyRound size={13} /> 키 입력</button>
+          <div className="ml-auto flex items-center gap-3">
+            <button onClick={() => setShowGuide((v) => !v)} className={`inline-flex items-center gap-1 text-xs hover:text-indigo-600 ${useGuidelines ? "text-indigo-600" : "text-slate-500"}`}>
+              <BookOpen size={13} /> 작성요령 {useGuidelines ? "(적용 중)" : "(미적용)"}
+            </button>
+            <button onClick={() => setShowKey((v) => !v)} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-600"><KeyRound size={13} /> 키 입력</button>
+          </div>
+          {showGuide && (
+            <div className="w-full space-y-2 border-t border-slate-100 pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-indigo-700 flex items-center gap-1.5"><BookOpen size={13} /> 생기부 작성요령 (AI 생성의 기준)</div>
+                <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                  <input type="checkbox" checked={useGuidelines} onChange={(e) => setUseGuidelines(e.target.checked)} className="h-4 w-4 accent-indigo-600" />
+                  AI 생성 시 이 작성요령을 기준으로 반영
+                </label>
+              </div>
+              <p className="text-xs text-slate-400">기본은 <b>2026학년도 일반 작성 원칙 요약본</b>입니다. 학교/교육청 공식 기재요령 문구로 바꿔 붙여넣으면 그 기준으로 생성됩니다. (평소엔 숨겨져 있어요)</p>
+              <textarea value={guidelines} onChange={(e) => setGuidelines(e.target.value)} rows={10}
+                className="w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-xs leading-relaxed focus:border-indigo-500 focus:outline-none" spellCheck={false} />
+              <div className="flex items-center justify-end gap-2">
+                <button onClick={() => setGuidelines(GUIDELINES_DEFAULT)} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:border-indigo-400"><RefreshCw size={12} /> 기본값으로 초기화</button>
+              </div>
+            </div>
+          )}
           {showKey && (
             <div className="w-full space-y-2 border-t border-slate-100 pt-2">
               {/* 키 입력 가이드 */}
@@ -1215,10 +1296,10 @@ export default function App() {
 
         {/* 탭 본문 (둘 다 마운트 유지 → 전환해도 입력 보존) */}
         <div className={mainTab === "behavior" ? "" : "hidden"}>
-          <BehaviorTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} />
+          <BehaviorTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} />
         </div>
         <div className={mainTab === "subject" ? "" : "hidden"}>
-          <SubjectTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} />
+          <SubjectTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} />
         </div>
         <div className={mainTab === "minach" ? "" : "hidden"}>
           <MinAchievementTab />
