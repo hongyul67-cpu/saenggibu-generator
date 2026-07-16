@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   Plus, Trash2, Sparkles, Download, Copy, Check, AlertTriangle, Users, Loader2,
-  Table, LayoutGrid, KeyRound, FileSpreadsheet, RefreshCw, X, ListPlus, BookOpen, ClipboardList, ShieldCheck, Flag, Hash, ExternalLink
+  Table, LayoutGrid, KeyRound, FileSpreadsheet, RefreshCw, X, ListPlus, BookOpen, ClipboardList, ShieldCheck, Flag, Hash, ExternalLink, Compass
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -1111,6 +1111,222 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
 }
 
 /* ============================================================
+   창의적 체험활동(자율·동아리·진로) 특기사항 탭
+   - 세특과 동일한 방식(개별/전체 생성, 참여 수준별 글자수, 초과 트림, 엑셀)
+   ============================================================ */
+const CA_AREAS = [
+  { key: "auto", label: "자율활동", extra: null,
+    focus: "학급·학교의 자치·자율 활동에서의 역할 수행, 공동체 의식, 리더십·책임감·협력을 중심으로 서술" },
+  { key: "club", label: "동아리활동", extra: { field: "clubName", label: "동아리명", placeholder: "예: 로봇제작반" },
+    focus: "동아리 활동에서의 관심 분야 탐구, 전문성·기능 신장, 협업과 역할을 중심으로 서술" },
+  { key: "career", label: "진로활동", extra: { field: "careerField", label: "진로·관심 분야", placeholder: "예: 전기공학" },
+    focus: "진로 탐색 활동, 자기 이해와 진로 성숙도, 진로와 연계한 노력을 중심으로 서술" },
+];
+const newActStudent = (name = "", number = "") => ({ id: uid(), name, number, level: "보통", memo: "", result: "", status: "idle", error: null });
+const newActArea = (a) => ({
+  key: a.key, label: a.label, clubName: "", careerField: "", commonActivity: "",
+  teacherChecks: [], teacherEtc: "", byteLimit: 1000, levelMode: true, levelLimits: { ...LEVEL_LIMIT_DEFAULT },
+  students: [newActStudent()],
+});
+
+function buildActivityPrompt({ area, meta, student, byteMode, guidelines, byteLimit }) {
+  const teacher = joinList(meta.teacherChecks, meta.teacherEtc);
+  const L = [];
+  L.push(`당신은 한국 고등학교 교사로서 학교생활기록부 '창의적 체험활동 - ${area.label} 특기사항'을 작성하는 전문가입니다.`);
+  L.push(`다음 정보를 바탕으로 한 학생의 ${area.label} 특기사항을 작성하세요.\n`);
+  const gb = guidelineBlock(guidelines);
+  if (gb) L.push(gb);
+  L.push(`[활동 정보]`);
+  L.push(`- 영역: 창의적 체험활동 / ${area.label}`);
+  if (area.key === "club" && meta.clubName && meta.clubName.trim()) L.push(`- 동아리명: ${meta.clubName.trim()}`);
+  if (area.key === "career" && meta.careerField && meta.careerField.trim()) L.push(`- 진로·관심 분야: ${meta.careerField.trim()}`);
+  if (meta.commonActivity && meta.commonActivity.trim()) L.push(`- 공통 활동 내용: ${meta.commonActivity.trim()}`);
+  L.push(``);
+  L.push(`[학생 정보]`);
+  L.push(`- 참여 수준: ${student.level}`);
+  if (student.memo && student.memo.trim()) L.push(`- 개별 관찰 메모: ${student.memo.trim()}`);
+  if (teacher) { L.push(``); L.push(`[작성 방향(교사 관점)]`); L.push(`- ${teacher}`); }
+  L.push(``);
+  L.push(`[작성 규칙]`);
+  L.push(`1. 문체: 객관적·관찰 중심, '~함','~을 보임','~을 수행함' 등 명사형/음슴체. 제3자 시점. 1인칭·경어체 금지.`);
+  L.push(`2. 주어진 정보에만 근거. 제공되지 않은 수치·대회명·수상 등 거짓 사실 금지.`);
+  L.push(`3. ${area.focus}.`);
+  L.push(`4. 참여 수준에 맞춰 톤·분량을 차등: '주도적/적극적'은 능동성과 구체적 기여 부각, '보통'은 사실 위주로 담백하게, '미흡'은 낙인 없이 기본 참여·성장 가능성 위주로 절제, '미참여'는 참여가 저조하였음을 간결·완곡하게 짧게.`);
+  L.push(`5. 개별 메모로 그 학생만의 모습이 드러나게 하고, 비어 있는 정보는 자연스럽게 생략.`);
+  if (teacher) L.push(`6. 위 '작성 방향'을 반영할 것.`);
+  L.push(`${teacher ? 7 : 6}. 분량은 반드시 ${byteLimit}바이트(한글 기준 약 ${approxChars(byteLimit, byteMode)}자)를 넘지 말 것. 완성된 문단만 출력하고 머리말·제목·따옴표·번호는 붙이지 말 것.`);
+  L.push(``);
+  L.push(`${area.label} 특기사항:`);
+  return L.join("\n");
+}
+
+function ActivityTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model }) {
+  const [areas, setAreas] = useState(() => CA_AREAS.map(newActArea));
+  const [activeKey, setActiveKey] = useState(CA_AREAS[0].key);
+  const [busyAll, setBusyAll] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+
+  const ref = useRef(areas);
+  useEffect(() => { ref.current = areas; }, [areas]);
+
+  const active = areas.find((a) => a.key === activeKey) || areas[0];
+  const areaDef = CA_AREAS.find((a) => a.key === active.key);
+  const limFor = (a, st) => (a.levelMode ? (a.levelLimits?.[st.level] ?? a.byteLimit) : a.byteLimit);
+
+  const patchArea = (key, p) => setAreas((prev) => prev.map((a) => (a.key === key ? { ...a, ...p } : a)));
+  const patchStudent = (key, stid, p) =>
+    setAreas((prev) => prev.map((a) => (a.key === key ? { ...a, students: a.students.map((st) => (st.id === stid ? { ...st, ...p } : st)) } : a)));
+  const patchLevelLimit = (lv, val) =>
+    patchArea(active.key, { levelLimits: { ...(active.levelLimits || LEVEL_LIMIT_DEFAULT), [lv]: Math.max(0, Number(val) || 0) } });
+
+  const genStudent = async (key, stid) => {
+    const a = ref.current.find((x) => x.key === key); if (!a) return;
+    const st = a.students.find((x) => x.id === stid); if (!st) return;
+    const def = CA_AREAS.find((x) => x.key === a.key);
+    const lim = limFor(a, st);
+    patchStudent(key, stid, { status: "loading", error: null });
+    try {
+      const prompt = buildActivityPrompt({ area: def, meta: a, student: st, byteMode, guidelines, byteLimit: lim });
+      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(lim), model);
+      patchStudent(key, stid, { result: trimToByteLimit(text, lim, byteMode), status: "done" });
+    } catch (e) { patchStudent(key, stid, { status: "error", error: e.message || "생성 실패" }); }
+  };
+  const genAll = async () => {
+    setBusyAll(true);
+    const a = ref.current.find((x) => x.key === activeKey);
+    if (a) for (const st of a.students) { if (!st.name && !st.memo) continue; await genStudent(a.key, st.id); await sleep(400); }
+    setBusyAll(false);
+  };
+
+  const addStudent = () => { if (active.students.length >= MAX_SUB_STUDENTS) return; patchArea(active.key, { students: [...active.students, newActStudent()] }); };
+  const removeStudent = (stid) => { const left = active.students.filter((s) => s.id !== stid); patchArea(active.key, { students: left.length ? left : [newActStudent()] }); };
+  const applyBulk = () => {
+    const names = bulkText.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!names.length) { setBulkOpen(false); return; }
+    const base = active.students.filter((s) => s.name || s.memo || s.result);
+    const room = MAX_SUB_STUDENTS - base.length;
+    const add = names.slice(0, Math.max(0, room)).map((n, i) => newActStudent(n, String(base.length + i + 1)));
+    patchArea(active.key, { students: [...base, ...add] });
+    setBulkText(""); setBulkOpen(false);
+  };
+
+  const exportExcel = () => {
+    const wb = XLSX.utils.book_new();
+    areas.forEach((a) => {
+      const rows = a.students.map((st, i) => {
+        const b = countBytes(st.result, byteMode);
+        const lim = limFor(a, st);
+        return { "번호": st.number || i + 1, "이름": st.name || "", "영역": a.label, "참여수준": st.level,
+          "특기사항": st.result || "", [`글자수(${byteMode}B)`]: b, "제한": lim, "제한초과": st.result && b > lim ? "O" : "" };
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws["!cols"] = [{ wch: 6 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 90 }, { wch: 12 }, { wch: 8 }, { wch: 8 }];
+      XLSX.utils.book_append_sheet(wb, ws, a.label);
+    });
+    XLSX.writeFile(wb, `창의적체험활동_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const doneCount = areas.reduce((n, a) => n + a.students.filter((x) => x.result).length, 0);
+
+  return (
+    <div>
+      {/* 영역 탭 */}
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        {areas.map((a) => (
+          <button key={a.key} onClick={() => setActiveKey(a.key)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${
+              a.key === activeKey ? "border-purple-600 bg-purple-600 text-white" : "border-slate-300 bg-white text-slate-600 hover:border-purple-400"
+            }`}>
+            <Compass size={14} /> {a.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 영역 설정 */}
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          {areaDef.extra && (
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-slate-500">{areaDef.extra.label}</span>
+              <input value={active[areaDef.extra.field] || ""} onChange={(e) => patchArea(active.key, { [areaDef.extra.field]: e.target.value })}
+                placeholder={areaDef.extra.placeholder} className="w-40 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-purple-500 focus:outline-none" />
+            </label>
+          )}
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-slate-500">{active.levelMode ? "기준 제한" : "제한"}</span>
+            <input type="number" value={active.byteLimit} min={0} step={100} onChange={(e) => patchArea(active.key, { byteLimit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-purple-500 focus:outline-none" />
+            <span className="text-slate-400 text-xs">바이트</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm" title="참여 수준(성적)에 따라 글자수 제한을 자동으로 다르게 적용">
+            <input type="checkbox" checked={active.levelMode} onChange={() => patchArea(active.key, { levelMode: !active.levelMode })} className="h-4 w-4 accent-purple-600" />
+            <span className="text-slate-600">수준별 글자수 <span className="text-slate-400 text-xs">(참여·성적별 자동 조정)</span></span>
+          </label>
+        </div>
+
+        {active.levelMode && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="mb-1.5 text-xs font-semibold text-purple-700">참여 수준별 글자수 제한(바이트) <span className="font-normal text-slate-400">(미참여·저조 학생은 더 짧게 · 직접 조정 가능)</span></div>
+            <div className="flex flex-wrap gap-2">
+              {LEVELS.map((lv) => (
+                <label key={lv} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                  <span className="font-medium">{lv}</span>
+                  <input type="number" min={0} step={50} value={(active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] ?? ""} onChange={(e) => patchLevelLimit(lv, e.target.value)}
+                    className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-sm focus:border-purple-500 focus:outline-none" />
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          <div className="text-xs font-semibold text-purple-700 mb-1.5">공통 활동 내용 <span className="font-normal text-slate-400">(선택 · 한 번 입력 후 학생 공통)</span></div>
+          <textarea value={active.commonActivity} onChange={(e) => patchArea(active.key, { commonActivity: e.target.value })} rows={2} spellCheck
+            placeholder={active.key === "club" ? "예: 자율주행 로봇을 설계·제작하는 프로젝트를 진행함" : active.key === "career" ? "예: 학과 탐방과 직업인 특강에 참여함" : "예: 학급 자치회의 운영과 학교 행사 준비에 참여함"}
+            className="w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none" />
+        </div>
+
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          <TeacherPerspective checks={active.teacherChecks} etc={active.teacherEtc}
+            onChecks={(v) => patchArea(active.key, { teacherChecks: v })} onEtc={(v) => patchArea(active.key, { teacherEtc: v })} />
+        </div>
+      </div>
+
+      {/* 툴바 */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button onClick={addStudent} disabled={active.students.length >= MAX_SUB_STUDENTS} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-purple-400 disabled:opacity-50"><Plus size={15} /> 학생 추가</button>
+        <button onClick={() => setBulkOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-purple-400"><ListPlus size={15} /> 이름 일괄 추가</button>
+        <button onClick={genAll} disabled={busyAll || !keyConfigured} className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50">
+          {busyAll ? <Loader2 size={15} className="animate-spin" /> : <Users size={15} />}{busyAll ? "생성 중…" : "이 영역 전체 생성"}
+        </button>
+        <button onClick={exportExcel} disabled={doneCount === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"><FileSpreadsheet size={15} /> 엑셀 저장(전 영역)</button>
+        <span className="ml-auto text-xs text-slate-400">{active.students.length}/{MAX_SUB_STUDENTS}명</span>
+      </div>
+
+      {bulkOpen && (
+        <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium text-slate-700">이름 한 줄에 하나씩 (최대 {MAX_SUB_STUDENTS}명)</span>
+            <button onClick={() => setBulkOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+          </div>
+          <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={5} placeholder={"김민준\n이서연\n박지후"} className="w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none" />
+          <div className="mt-2 flex justify-end"><button onClick={applyBulk} className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-700">추가하기</button></div>
+        </div>
+      )}
+
+      <div className="space-y-2.5">
+        {active.students.map((st, i) => (
+          <SubjectStudentRow key={st.id} st={st} idx={i} byteMode={byteMode} byteLimit={limFor(active, st)}
+            coTeaching={false} coTeachers={[]} topicMode={false} topics={[]}
+            onChange={(p) => patchStudent(active.key, st.id, p)} onRemove={() => removeStudent(st.id)}
+            onGenerate={() => genStudent(active.key, st.id)} onVary={() => {}} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    최소성취 대상학생 체크 탭
    - 명단을 만든 뒤(직접/일괄), 최소성취 수준 이하 '대상' 학생을 체크
    - 학번을 쉼표·공백·줄바꿈으로 입력하면 여러 명을 한 번에 자동 체크
@@ -1322,7 +1538,7 @@ export default function App() {
         </div>
 
         {/* 메인 탭 */}
-        <div className="mb-4 flex gap-2">
+        <div className="mb-4 flex flex-wrap gap-2">
           <button onClick={() => setMainTab("behavior")}
             className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${mainTab === "behavior" ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-600 border border-slate-200 hover:border-indigo-300"}`}>
             <ClipboardList size={16} /> 행동특성
@@ -1330,6 +1546,10 @@ export default function App() {
           <button onClick={() => setMainTab("subject")}
             className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${mainTab === "subject" ? "bg-teal-600 text-white shadow-sm" : "bg-white text-slate-600 border border-slate-200 hover:border-teal-300"}`}>
             <BookOpen size={16} /> 세부능력 및 특기사항
+          </button>
+          <button onClick={() => setMainTab("creative")}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${mainTab === "creative" ? "bg-purple-600 text-white shadow-sm" : "bg-white text-slate-600 border border-slate-200 hover:border-purple-300"}`}>
+            <Compass size={16} /> 창의적 체험활동
           </button>
           <button onClick={() => setMainTab("minach")}
             className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${mainTab === "minach" ? "bg-rose-600 text-white shadow-sm" : "bg-white text-slate-600 border border-slate-200 hover:border-rose-300"}`}>
@@ -1441,6 +1661,9 @@ export default function App() {
         </div>
         <div className={mainTab === "subject" ? "" : "hidden"}>
           <SubjectTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} model={model} />
+        </div>
+        <div className={mainTab === "creative" ? "" : "hidden"}>
+          <ActivityTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} model={model} />
         </div>
         <div className={mainTab === "minach" ? "" : "hidden"}>
           <MinAchievementTab />
