@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   Plus, Trash2, Sparkles, Download, Copy, Check, AlertTriangle, Users, Loader2,
-  Table, LayoutGrid, KeyRound, FileSpreadsheet, RefreshCw, X, ListPlus, BookOpen, ClipboardList, ShieldCheck
+  Table, LayoutGrid, KeyRound, FileSpreadsheet, RefreshCw, X, ListPlus, BookOpen, ClipboardList, ShieldCheck, Flag, Hash
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -774,6 +774,143 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
 }
 
 /* ============================================================
+   최소성취 대상학생 체크 탭
+   - 명단을 만든 뒤(직접/일괄), 최소성취 수준 이하 '대상' 학생을 체크
+   - 학번을 쉼표·공백·줄바꿈으로 입력하면 여러 명을 한 번에 자동 체크
+     (명단에 없는 학번은 새 행으로 추가하며 체크)
+   - 대상자만 추려 새 시트(엑셀)로 저장
+   ============================================================ */
+const newMinStudent = (number = "", name = "") => ({ id: uid(), number, name, target: false });
+
+function MinAchievementTab() {
+  const [students, setStudents] = useState([newMinStudent("1")]);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [numInput, setNumInput] = useState("");
+
+  const patch = (id, p) => setStudents((prev) => prev.map((s) => (s.id === id ? { ...s, ...p } : s)));
+  const addStudent = () => setStudents((p) => [...p, newMinStudent(String(p.length + 1))]);
+  const removeStudent = (id) => setStudents((p) => (p.length === 1 ? [newMinStudent("1")] : p.filter((s) => s.id !== id)));
+
+  const applyBulk = () => {
+    const lines = bulkText.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) { setBulkOpen(false); return; }
+    setStudents((prev) => {
+      const base = prev.filter((s) => s.number || s.name || s.target);
+      const start = base.length;
+      const add = lines.map((line, i) => {
+        const m = line.match(/^(\d+)[\s.\)-]+(.+)$/); // "3 김민준" / "3. 김민준" / "3) 김민준"
+        if (m) return newMinStudent(m[1], m[2].trim());
+        if (/^\d+$/.test(line)) return newMinStudent(line, "");
+        return newMinStudent(String(start + i + 1), line);
+      });
+      return [...base, ...add];
+    });
+    setBulkText(""); setBulkOpen(false);
+  };
+
+  const applyNumbers = () => {
+    const nums = Array.from(new Set(numInput.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean)));
+    if (!nums.length) return;
+    const numSet = new Set(nums.map(String));
+    setStudents((prev) => {
+      const existing = new Set(prev.map((s) => String(s.number)));
+      const out = prev.map((s) => (numSet.has(String(s.number)) ? { ...s, target: true } : s));
+      const missing = nums.filter((n) => !existing.has(String(n))).sort((a, b) => Number(a) - Number(b));
+      return [...out, ...missing.map((n) => ({ ...newMinStudent(n, ""), target: true }))];
+    });
+    setNumInput("");
+  };
+
+  const clearTargets = () => setStudents((prev) => prev.map((s) => ({ ...s, target: false })));
+
+  const targets = students.filter((s) => s.target);
+  const exportExcel = () => {
+    const rows = targets
+      .slice()
+      .sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0))
+      .map((s) => ({ "번호": s.number || "", "이름": s.name || "", "구분": "최소성취 대상" }));
+    if (!rows.length) return;
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [{ wch: 8 }, { wch: 14 }, { wch: 16 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "최소성취대상");
+    XLSX.writeFile(wb, `최소성취대상_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  return (
+    <div>
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-1.5 text-xs font-semibold text-rose-700 flex items-center gap-1.5"><Hash size={13} /> 학번으로 한 번에 체크</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={numInput} onChange={(e) => setNumInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") applyNumbers(); }}
+            placeholder="예: 3, 7, 12  또는  3 7 12 (쉼표·공백 구분)"
+            className="min-w-[220px] flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-rose-500 focus:outline-none" />
+          <button onClick={applyNumbers} className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700"><Check size={15} /> 대상 체크</button>
+        </div>
+        <p className="mt-1.5 text-xs text-slate-400">입력한 학번을 대상으로 표시합니다. 명단에 없는 학번은 새 행으로 추가돼요.</p>
+      </div>
+
+      {/* 툴바 */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button onClick={addStudent} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-rose-400"><Plus size={15} /> 학생 추가</button>
+        <button onClick={() => setBulkOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-rose-400"><ListPlus size={15} /> 명단 일괄 추가</button>
+        <button onClick={clearTargets} disabled={!targets.length} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-slate-400 disabled:opacity-50"><RefreshCw size={15} /> 체크 초기화</button>
+        <button onClick={exportExcel} disabled={!targets.length} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"><Download size={15} /> 대상자 엑셀 저장</button>
+        <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-sm font-semibold text-rose-700"><Flag size={14} /> 대상 {targets.length}명 / 전체 {students.length}명</span>
+      </div>
+
+      {bulkOpen && (
+        <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium text-slate-700">한 줄에 한 명 · "번호 이름" 또는 "이름"</span>
+            <button onClick={() => setBulkOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+          </div>
+          <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={5} placeholder={"1 김민준\n2 이서연\n3 박지후"} className="w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-rose-500 focus:outline-none" />
+          <div className="mt-2 flex justify-end"><button onClick={applyBulk} className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700">추가하기</button></div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-[420px] text-sm">
+          <thead><tr className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+            <th className="w-16 px-3 py-2">대상</th><th className="w-20 px-3 py-2">번호</th><th className="px-3 py-2">이름</th><th className="w-12 px-3 py-2"></th>
+          </tr></thead>
+          <tbody>
+            {students.map((s) => (
+              <tr key={s.id} className={`border-b border-slate-100 ${s.target ? "bg-rose-50" : ""}`}>
+                <td className="px-3 py-2">
+                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                    <input type="checkbox" checked={s.target} onChange={(e) => patch(s.id, { target: e.target.checked })} className="h-4 w-4 accent-rose-600" />
+                  </label>
+                </td>
+                <td className="px-3 py-2"><input value={s.number} onChange={(e) => patch(s.id, { number: e.target.value })} placeholder="번호" className="w-14 rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-rose-500 focus:outline-none" /></td>
+                <td className="px-3 py-2"><input value={s.name} onChange={(e) => patch(s.id, { name: e.target.value })} placeholder="이름" className="w-full max-w-[200px] rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-rose-500 focus:outline-none" /></td>
+                <td className="px-3 py-2"><button onClick={() => removeStudent(s.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={15} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {targets.length > 0 && (
+        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3">
+          <div className="mb-1.5 text-xs font-semibold text-rose-700 flex items-center gap-1.5"><Flag size={13} /> 최소성취 대상 학생 ({targets.length}명)</div>
+          <div className="flex flex-wrap gap-1.5">
+            {targets.slice().sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0)).map((s) => (
+              <span key={s.id} className="inline-flex items-center gap-1 rounded-full border border-rose-300 bg-white px-2.5 py-1 text-xs text-rose-700">
+                {s.number && <span className="font-semibold">{s.number}</span>}{s.name || "(이름 미입력)"}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    메인 (탭 전환)
    ============================================================ */
 const IS_DIST = import.meta.env.VITE_DIST === "1"; // 배포용 빌드 표시(키 미포함)
@@ -836,6 +973,10 @@ export default function App() {
             className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${mainTab === "subject" ? "bg-teal-600 text-white shadow-sm" : "bg-white text-slate-600 border border-slate-200 hover:border-teal-300"}`}>
             <BookOpen size={16} /> 세부능력 및 특기사항
           </button>
+          <button onClick={() => setMainTab("minach")}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${mainTab === "minach" ? "bg-rose-600 text-white shadow-sm" : "bg-white text-slate-600 border border-slate-200 hover:border-rose-300"}`}>
+            <Flag size={16} /> 최소성취 대상
+          </button>
         </div>
 
         {/* 키 미설정 안내 */}
@@ -881,6 +1022,9 @@ export default function App() {
         </div>
         <div className={mainTab === "subject" ? "" : "hidden"}>
           <SubjectTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} />
+        </div>
+        <div className={mainTab === "minach" ? "" : "hidden"}>
+          <MinAchievementTab />
         </div>
 
         <footer className="mt-6 text-center text-xs text-slate-400">
