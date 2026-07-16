@@ -209,13 +209,19 @@ const newBehaviorStudent = (name = "", number = "") => ({
 });
 const newSubStudent = (name = "", number = "") => ({
   id: uid(), name, number, level: "보통", memo: "", result: "", status: "idle", error: null,
+  segments: {}, // 공동 교과: { [teacherId]: 텍스트 }
 });
+const newCoTeacher = (name = "") => ({ id: uid(), name, limit: 500 });
 const newSubject = (name = "") => ({
   id: uid(), name, type: "general", standard: "",
   activities: [], activityEtc: "", commonActivity: "", evalMemo: "",
   teacherChecks: [], teacherEtc: "", byteLimit: 1500,
+  coTeaching: false, coTeachers: [],
   students: [newSubStudent()],
 });
+// 공동 교과 합산: 각 교사 입력을 앞뒤 공백 제거 후, 내용이 있는 것만 빈 칸 1칸으로 이어붙임
+const mergeSegments = (teachers, segments) =>
+  (teachers || []).map((t) => (segments?.[t.id] || "").trim()).filter(Boolean).join(" ");
 
 /* ============================================================
    공용 컴포넌트
@@ -547,30 +553,69 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
 /* ============================================================
    세특 탭
    ============================================================ */
-function SubjectStudentRow({ st, idx, byteMode, byteLimit, onChange, onRemove, onGenerate }) {
+function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeachers, onChange, onRemove, onGenerate }) {
   const bytes = countBytes(st.result, byteMode);
+  const setSegment = (tid, text) => {
+    const segments = { ...(st.segments || {}), [tid]: text };
+    onChange({ segments, result: mergeSegments(coTeachers, segments) });
+  };
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-xs font-bold text-teal-700">{st.number || idx + 1}</div>
         <input value={st.number} onChange={(e) => onChange({ number: e.target.value })} placeholder="번호" className="w-12 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
         <input value={st.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="이름" className="w-24 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
-        <select value={st.level} onChange={(e) => onChange({ level: e.target.value })} className="rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none">
-          {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
-        </select>
-        <input value={st.memo} onChange={(e) => onChange({ memo: e.target.value })} placeholder="개별 메모·특이사항 (선택)" className="min-w-[140px] flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
-        <button onClick={onGenerate} disabled={st.status === "loading"} className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60">
-          {st.status === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-        </button>
-        <button onClick={onRemove} className="text-slate-300 hover:text-red-500"><Trash2 size={15} /></button>
+        {!coTeaching && (
+          <>
+            <select value={st.level} onChange={(e) => onChange({ level: e.target.value })} className="rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none">
+              {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+            <input value={st.memo} onChange={(e) => onChange({ memo: e.target.value })} placeholder="개별 메모·특이사항 (선택)" className="min-w-[140px] flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
+            <button onClick={onGenerate} disabled={st.status === "loading"} className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60">
+              {st.status === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            </button>
+          </>
+        )}
+        <button onClick={onRemove} className="ml-auto text-slate-300 hover:text-red-500"><Trash2 size={15} /></button>
       </div>
       {st.error && <div className="mt-2 flex items-start gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-xs text-red-600"><AlertTriangle size={13} className="mt-0.5 shrink-0" /> {st.error}</div>}
-      {(st.result || st.status === "loading") && (
-        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-          <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
-            limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id} />
-          <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+
+      {/* 공동 교과: 교사별 입력 + 자동 합산 미리보기 */}
+      {coTeaching ? (
+        <div className="mt-2 space-y-2">
+          {coTeachers.length === 0 ? (
+            <div className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">위 '공동 교과' 설정에서 담당 교사를 먼저 추가하세요.</div>
+          ) : (
+            coTeachers.map((t, ti) => {
+              const val = st.segments?.[t.id] || "";
+              return (
+                <div key={t.id}>
+                  <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-teal-700">
+                    <span className="flex h-4 w-4 items-center justify-center rounded bg-teal-100 text-[10px] font-bold text-teal-700">{ti + 1}</span>
+                    {t.name || `교사 ${ti + 1}`}<span className="font-normal text-slate-400">· 제한 {t.limit}B</span>
+                  </div>
+                  <LimitedTextarea value={val} onChange={(v) => setSegment(t.id, v)} rows={2}
+                    placeholder={`${t.name || `교사 ${ti + 1}`} 담당 단원 내용`} limit={t.limit} byteMode={byteMode} accent="teal" seed={st.id + t.id} />
+                  <div className="mt-1"><ByteGauge bytes={countBytes(val, byteMode)} limit={t.limit} /></div>
+                </div>
+              );
+            })
+          )}
+          <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-2.5">
+            <div className="mb-1 text-xs font-semibold text-teal-700">자동 합산 결과 <span className="font-normal text-slate-400">(내용 있는 교사만 빈 칸 1칸으로 이어붙임)</span></div>
+            <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={3} placeholder="교사별 내용을 입력하면 자동으로 합쳐집니다 (직접 수정 가능)"
+              limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id + "merged"} />
+            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+          </div>
         </div>
+      ) : (
+        (st.result || st.status === "loading") && (
+          <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+            <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
+              limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id} />
+            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+          </div>
+        )
       )}
     </div>
   );
@@ -605,8 +650,24 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
     });
   };
 
+  const patchTeachers = (sid, teachers) => patchSubject(sid, { coTeachers: teachers });
+  const addTeacher = () => {
+    const list = active.coTeachers || [];
+    if (list.length >= 4) return;
+    patchTeachers(active.id, [...list, newCoTeacher(`교사 ${list.length + 1}`)]);
+  };
+  const removeTeacher = (tid) => patchTeachers(active.id, (active.coTeachers || []).filter((t) => t.id !== tid));
+  const patchTeacher = (tid, p) => patchTeachers(active.id, (active.coTeachers || []).map((t) => (t.id === tid ? { ...t, ...p } : t)));
+  const toggleCoTeaching = () => {
+    const on = !active.coTeaching;
+    // 처음 켤 때 교사 2명 기본 생성
+    const teachers = on && (active.coTeachers || []).length === 0 ? [newCoTeacher("교사 1"), newCoTeacher("교사 2")] : active.coTeachers;
+    patchSubject(active.id, { coTeaching: on, coTeachers: teachers });
+  };
+
   const genStudent = async (sid, stid) => {
     const sub = ref.current.find((s) => s.id === sid); if (!sub) return;
+    if (sub.coTeaching) return; // 공동 교과는 교사 직접 입력 → AI 생성 미사용
     const st = sub.students.find((x) => x.id === stid); if (!st) return;
     patchStudent(sid, stid, { status: "loading", error: null });
     try {
@@ -705,7 +766,37 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
             <input type="number" value={active.byteLimit} min={0} step={100} onChange={(e) => patchSubject(active.id, { byteLimit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
             <span className="text-slate-400 text-xs">바이트</span>
           </label>
+          <label className="flex items-center gap-2 text-sm" title="한 과목을 여러 교사가 단원별로 나눠 가르칠 때">
+            <input type="checkbox" checked={active.coTeaching} onChange={toggleCoTeaching} className="h-4 w-4 accent-teal-600" />
+            <span className="text-slate-600">공동 교과 <span className="text-slate-400 text-xs">(단원 분담·자동 합산)</span></span>
+          </label>
         </div>
+
+        {active.coTeaching && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-xs font-semibold text-teal-700">담당 교사 <span className="font-normal text-slate-400">(교사별 글자수 제한 · 학생마다 교사별로 입력)</span></div>
+              <button onClick={addTeacher} disabled={(active.coTeachers || []).length >= 4} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:border-teal-400 disabled:opacity-50"><Plus size={12} /> 교사 추가</button>
+            </div>
+            <div className="space-y-1.5">
+              {(active.coTeachers || []).map((t, ti) => (
+                <div key={t.id} className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded bg-teal-100 text-[11px] font-bold text-teal-700">{ti + 1}</span>
+                  <input value={t.name} onChange={(e) => patchTeacher(t.id, { name: e.target.value })} placeholder={`교사 ${ti + 1} 이름/단원`} className="w-44 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
+                  <label className="flex items-center gap-1 text-xs text-slate-500">
+                    제한
+                    <input type="number" value={t.limit} min={0} step={100} onChange={(e) => patchTeacher(t.id, { limit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
+                    바이트
+                  </label>
+                  {(active.coTeachers || []).length > 1 && (
+                    <button onClick={() => removeTeacher(t.id)} className="text-slate-300 hover:text-red-500"><X size={14} /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-slate-400">교사별 입력 내용이 있는 것만 빈 칸 1칸으로 자동 합쳐집니다. 공동 교과에서는 AI 생성 대신 교사가 직접 입력해요.</p>
+          </div>
+        )}
 
         <div className="mt-3 border-t border-slate-100 pt-3">
           <div className="text-xs font-semibold text-teal-700 mb-1.5">{isNcs ? "능력단위·수행준거" : "성취기준"} <span className="font-normal text-slate-400">(선택 · 한 번 입력 후 25명 공통)</span></div>
@@ -745,9 +836,11 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <button onClick={addStudent} disabled={active.students.length >= MAX_SUB_STUDENTS} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-teal-400 disabled:opacity-50"><Plus size={15} /> 학생 추가</button>
         <button onClick={() => setBulkOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-teal-400"><ListPlus size={15} /> 이름 일괄 추가</button>
-        <button onClick={genAll} disabled={busyAll || !keyConfigured} className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">
-          {busyAll ? <Loader2 size={15} className="animate-spin" /> : <Users size={15} />}{busyAll ? "생성 중…" : "이 과목 전체 생성"}
-        </button>
+        {!active.coTeaching && (
+          <button onClick={genAll} disabled={busyAll || !keyConfigured} className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">
+            {busyAll ? <Loader2 size={15} className="animate-spin" /> : <Users size={15} />}{busyAll ? "생성 중…" : "이 과목 전체 생성"}
+          </button>
+        )}
         <button onClick={exportExcel} disabled={doneCount === 0} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"><FileSpreadsheet size={15} /> 엑셀 저장(전 과목)</button>
         <span className="ml-auto text-xs text-slate-400">{active.students.length}/{MAX_SUB_STUDENTS}명</span>
       </div>
@@ -766,6 +859,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
       <div className="space-y-2.5">
         {active.students.map((st, i) => (
           <SubjectStudentRow key={st.id} st={st} idx={i} byteMode={byteMode} byteLimit={active.byteLimit}
+            coTeaching={active.coTeaching} coTeachers={active.coTeachers || []}
             onChange={(p) => patchStudent(active.id, st.id, p)} onRemove={() => removeStudent(st.id)} onGenerate={() => genStudent(active.id, st.id)} />
         ))}
       </div>
