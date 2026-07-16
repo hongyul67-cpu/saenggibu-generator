@@ -210,18 +210,24 @@ const newBehaviorStudent = (name = "", number = "") => ({
 const newSubStudent = (name = "", number = "") => ({
   id: uid(), name, number, level: "보통", memo: "", result: "", status: "idle", error: null,
   segments: {}, // 공동 교과: { [teacherId]: 텍스트 }
+  picks: {},    // 활동 주제별: { [topicId]: 수준 }
 });
 const newCoTeacher = (name = "") => ({ id: uid(), name, limit: 500 });
+const newTopic = (name = "") => ({ id: uid(), name, levels: { 주도적: "", 적극적: "", 보통: "", 미흡: "" } });
 const newSubject = (name = "") => ({
   id: uid(), name, type: "general", standard: "",
   activities: [], activityEtc: "", commonActivity: "", evalMemo: "",
   teacherChecks: [], teacherEtc: "", byteLimit: 1500,
   coTeaching: false, coTeachers: [],
+  topicMode: false, topics: [],
   students: [newSubStudent()],
 });
 // 공동 교과 합산: 각 교사 입력을 앞뒤 공백 제거 후, 내용이 있는 것만 빈 칸 1칸으로 이어붙임
 const mergeSegments = (teachers, segments) =>
   (teachers || []).map((t) => (segments?.[t.id] || "").trim()).filter(Boolean).join(" ");
+// 활동 주제별: 학생이 주제마다 고른 수준의 내용을 순서대로 빈 칸 1칸으로 이어붙임
+const compileTopics = (topics, picks) =>
+  (topics || []).map((t) => { const lv = picks?.[t.id]; return lv ? (t.levels?.[lv] || "").trim() : ""; }).filter(Boolean).join(" ");
 
 /* ============================================================
    공용 컴포넌트
@@ -553,11 +559,16 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured }) {
 /* ============================================================
    세특 탭
    ============================================================ */
-function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeachers, onChange, onRemove, onGenerate }) {
+function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeachers, topicMode, topics, onChange, onRemove, onGenerate }) {
   const bytes = countBytes(st.result, byteMode);
+  const plain = !coTeaching && !topicMode;
   const setSegment = (tid, text) => {
     const segments = { ...(st.segments || {}), [tid]: text };
     onChange({ segments, result: mergeSegments(coTeachers, segments) });
+  };
+  const setPick = (topicId, level) => {
+    const picks = { ...(st.picks || {}), [topicId]: level };
+    onChange({ picks, result: compileTopics(topics, picks) });
   };
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
@@ -565,7 +576,7 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-xs font-bold text-teal-700">{st.number || idx + 1}</div>
         <input value={st.number} onChange={(e) => onChange({ number: e.target.value })} placeholder="번호" className="w-12 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
         <input value={st.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="이름" className="w-24 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
-        {!coTeaching && (
+        {plain && (
           <>
             <select value={st.level} onChange={(e) => onChange({ level: e.target.value })} className="rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none">
               {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
@@ -580,8 +591,33 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
       </div>
       {st.error && <div className="mt-2 flex items-start gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-xs text-red-600"><AlertTriangle size={13} className="mt-0.5 shrink-0" /> {st.error}</div>}
 
-      {/* 공동 교과: 교사별 입력 + 자동 합산 미리보기 */}
-      {coTeaching ? (
+      {/* 활동 주제별: 주제마다 수준 선택 → 자동 기록 */}
+      {topicMode ? (
+        <div className="mt-2 space-y-2">
+          {topics.length === 0 ? (
+            <div className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">위 '활동 주제별 입력' 설정에서 활동 주제를 먼저 추가하세요.</div>
+          ) : (
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {topics.map((t, ti) => (
+                <label key={t.id} className="flex items-center gap-1.5 text-sm">
+                  <span className="text-slate-500">{t.name || `주제 ${ti + 1}`}</span>
+                  <select value={st.picks?.[t.id] || ""} onChange={(e) => setPick(t.id, e.target.value)}
+                    className="rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none">
+                    <option value="">해당 없음</option>
+                    {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-2.5">
+            <div className="mb-1 text-xs font-semibold text-teal-700">자동 기록 결과 <span className="font-normal text-slate-400">(선택한 주제·수준 내용을 이어붙임 · 직접 수정 가능)</span></div>
+            <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={3} placeholder="주제별 수준을 선택하면 자동으로 기록됩니다"
+              limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id + "topic"} />
+            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+          </div>
+        </div>
+      ) : coTeaching ? (
         <div className="mt-2 space-y-2">
           {coTeachers.length === 0 ? (
             <div className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">위 '공동 교과' 설정에서 담당 교사를 먼저 추가하세요.</div>
@@ -660,14 +696,26 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
   const patchTeacher = (tid, p) => patchTeachers(active.id, (active.coTeachers || []).map((t) => (t.id === tid ? { ...t, ...p } : t)));
   const toggleCoTeaching = () => {
     const on = !active.coTeaching;
-    // 처음 켤 때 교사 2명 기본 생성
+    // 처음 켤 때 교사 2명 기본 생성 / 공동 교과 켜면 활동 주제 모드는 끔
     const teachers = on && (active.coTeachers || []).length === 0 ? [newCoTeacher("교사 1"), newCoTeacher("교사 2")] : active.coTeachers;
-    patchSubject(active.id, { coTeaching: on, coTeachers: teachers });
+    patchSubject(active.id, { coTeaching: on, coTeachers: teachers, topicMode: on ? false : active.topicMode });
+  };
+
+  const patchTopics = (topics) => patchSubject(active.id, { topics });
+  const addTopic = () => { const list = active.topics || []; if (list.length >= 8) return; patchTopics([...list, newTopic(`주제 ${list.length + 1}`)]); };
+  const removeTopic = (tid) => patchTopics((active.topics || []).filter((t) => t.id !== tid));
+  const patchTopic = (tid, p) => patchTopics((active.topics || []).map((t) => (t.id === tid ? { ...t, ...p } : t)));
+  const patchTopicLevel = (tid, level, text) =>
+    patchTopics((active.topics || []).map((t) => (t.id === tid ? { ...t, levels: { ...t.levels, [level]: text } } : t)));
+  const toggleTopicMode = () => {
+    const on = !active.topicMode;
+    const topics = on && (active.topics || []).length === 0 ? [newTopic("주제 1")] : active.topics;
+    patchSubject(active.id, { topicMode: on, topics, coTeaching: on ? false : active.coTeaching });
   };
 
   const genStudent = async (sid, stid) => {
     const sub = ref.current.find((s) => s.id === sid); if (!sub) return;
-    if (sub.coTeaching) return; // 공동 교과는 교사 직접 입력 → AI 생성 미사용
+    if (sub.coTeaching || sub.topicMode) return; // 공동 교과·활동 주제별은 직접 입력/선택 → AI 생성 미사용
     const st = sub.students.find((x) => x.id === stid); if (!st) return;
     patchStudent(sid, stid, { status: "loading", error: null });
     try {
@@ -770,7 +818,42 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
             <input type="checkbox" checked={active.coTeaching} onChange={toggleCoTeaching} className="h-4 w-4 accent-teal-600" />
             <span className="text-slate-600">공동 교과 <span className="text-slate-400 text-xs">(단원 분담·자동 합산)</span></span>
           </label>
+          <label className="flex items-center gap-2 text-sm" title="주제별로 수준(주도적~미흡) 내용을 미리 만들어두고 학생마다 선택">
+            <input type="checkbox" checked={active.topicMode} onChange={toggleTopicMode} className="h-4 w-4 accent-teal-600" />
+            <span className="text-slate-600">활동 주제별 <span className="text-slate-400 text-xs">(수준별 선택·자동 기록)</span></span>
+          </label>
         </div>
+
+        {active.topicMode && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-xs font-semibold text-teal-700">활동 주제 뱅크 <span className="font-normal text-slate-400">(주제마다 수준별 내용을 미리 작성 → 학생별로 수준만 선택)</span></div>
+              <button onClick={addTopic} disabled={(active.topics || []).length >= 8} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:border-teal-400 disabled:opacity-50"><Plus size={12} /> 주제 추가</button>
+            </div>
+            <div className="space-y-2.5">
+              {(active.topics || []).map((t, ti) => (
+                <div key={t.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="flex h-5 w-5 items-center justify-center rounded bg-teal-100 text-[11px] font-bold text-teal-700">{ti + 1}</span>
+                    <input value={t.name} onChange={(e) => patchTopic(t.id, { name: e.target.value })} placeholder={`활동 주제 ${ti + 1} (예: 2차전지 탐구)`} className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
+                    {(active.topics || []).length > 1 && <button onClick={() => removeTopic(t.id)} className="text-slate-300 hover:text-red-500"><X size={14} /></button>}
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {LEVELS.map((lv) => (
+                      <div key={lv}>
+                        <div className="mb-0.5 text-[11px] font-medium text-slate-500">{lv} 수준 문구</div>
+                        <textarea value={t.levels?.[lv] || ""} onChange={(e) => patchTopicLevel(t.id, lv, e.target.value)} rows={2}
+                          placeholder={`${lv} 수준에서 기록할 내용`} spellCheck
+                          className="w-full resize-none rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-teal-500 focus:outline-none" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-slate-400">학생 목록에서 주제별 수준을 고르면, 고른 수준의 문구가 순서대로 자동 기록됩니다. '해당 없음'은 제외돼요.</p>
+          </div>
+        )}
 
         {active.coTeaching && (
           <div className="mt-3 border-t border-slate-100 pt-3">
@@ -836,7 +919,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <button onClick={addStudent} disabled={active.students.length >= MAX_SUB_STUDENTS} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-teal-400 disabled:opacity-50"><Plus size={15} /> 학생 추가</button>
         <button onClick={() => setBulkOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-teal-400"><ListPlus size={15} /> 이름 일괄 추가</button>
-        {!active.coTeaching && (
+        {!active.coTeaching && !active.topicMode && (
           <button onClick={genAll} disabled={busyAll || !keyConfigured} className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50">
             {busyAll ? <Loader2 size={15} className="animate-spin" /> : <Users size={15} />}{busyAll ? "생성 중…" : "이 과목 전체 생성"}
           </button>
@@ -860,6 +943,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured }) {
         {active.students.map((st, i) => (
           <SubjectStudentRow key={st.id} st={st} idx={i} byteMode={byteMode} byteLimit={active.byteLimit}
             coTeaching={active.coTeaching} coTeachers={active.coTeachers || []}
+            topicMode={active.topicMode} topics={active.topics || []}
             onChange={(p) => patchStudent(active.id, st.id, p)} onRemove={() => removeStudent(st.id)} onGenerate={() => genStudent(active.id, st.id)} />
         ))}
       </div>
