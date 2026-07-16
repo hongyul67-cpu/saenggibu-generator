@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   Plus, Trash2, Sparkles, Download, Copy, Check, AlertTriangle, Users, Loader2,
-  Table, LayoutGrid, KeyRound, FileSpreadsheet, RefreshCw, X, ListPlus, BookOpen, ClipboardList, ShieldCheck, Flag, Hash
+  Table, LayoutGrid, KeyRound, FileSpreadsheet, RefreshCw, X, ListPlus, BookOpen, ClipboardList, ShieldCheck, Flag, Hash, ExternalLink
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -1183,13 +1183,32 @@ export default function App() {
           </label>
           <button onClick={() => setShowKey((v) => !v)} className="ml-auto inline-flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-600"><KeyRound size={13} /> 키 입력</button>
           {showKey && (
-            <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 border-t border-slate-100 pt-2">
-              <input type="password" value={apiKeyOverride} onChange={(e) => setApiKeyOverride(e.target.value)} placeholder="Gemini API 키 붙여넣기 (aistudio.google.com/apikey)" className="min-w-[200px] flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
-              <span className={`text-xs ${keyConfigured ? "text-emerald-600" : "text-slate-400"}`}>{keyConfigured ? "● 사용 가능" : "○ 미설정"}</span>
-              <label className="inline-flex items-center gap-1.5 text-xs text-slate-500" title="끄면 새로고침 시 키가 사라집니다">
-                <input type="checkbox" checked={rememberKey} onChange={(e) => setRememberKey(e.target.checked)} className="accent-indigo-600" /> 이 브라우저에 저장
-              </label>
-              {apiKeyOverride && <button onClick={() => setApiKeyOverride("")} className="text-xs text-slate-400 hover:text-red-500">지우기</button>}
+            <div className="w-full space-y-2 border-t border-slate-100 pt-2">
+              {/* 키 입력 가이드 */}
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 p-3 text-xs text-slate-600">
+                <div className="mb-1.5 flex items-center gap-1.5 font-semibold text-indigo-700"><KeyRound size={13} /> Gemini API 키 발급·입력 방법</div>
+                <ol className="list-decimal space-y-1 pl-4 leading-relaxed">
+                  <li>
+                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-0.5 font-medium text-indigo-600 underline hover:text-indigo-700">
+                      Google AI Studio 키 발급 페이지 <ExternalLink size={11} />
+                    </a>{" "}열기 (구글 계정 로그인)
+                  </li>
+                  <li><b>Create API key</b>(API 키 만들기) 클릭 → 프로젝트 선택/생성하면 <code className="rounded bg-white px-1">AIza…</code>로 시작하는 키가 만들어집니다.</li>
+                  <li>키 오른쪽 <b>복사</b> 버튼을 눌러 복사합니다.</li>
+                  <li>아래 칸에 <b>붙여넣기</b>(Ctrl/⌘+V) → 오른쪽에 <span className="text-emerald-600 font-medium">● 사용 가능</span>이 뜨면 완료!</li>
+                  <li>같은 브라우저에서 계속 쓰려면 <b>‘이 브라우저에 저장’</b>을 체크하세요(다음에 다시 입력 안 해도 됩니다).</li>
+                </ol>
+                <p className="mt-1.5 text-[11px] text-slate-400">키는 구글(생성 요청)로만 전송되고 별도 서버에 저장되지 않아요. 무료 등급으로도 충분히 사용할 수 있습니다.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <input type="password" value={apiKeyOverride} onChange={(e) => setApiKeyOverride(e.target.value)} placeholder="여기에 Gemini API 키 붙여넣기 (AIza… 로 시작)" className="min-w-[200px] flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
+                <span className={`text-xs ${keyConfigured ? "text-emerald-600" : "text-slate-400"}`}>{keyConfigured ? "● 사용 가능" : "○ 미설정"}</span>
+                <label className="inline-flex items-center gap-1.5 text-xs text-slate-500" title="끄면 새로고침 시 키가 사라집니다">
+                  <input type="checkbox" checked={rememberKey} onChange={(e) => setRememberKey(e.target.checked)} className="accent-indigo-600" /> 이 브라우저에 저장
+                </label>
+                {apiKeyOverride && <button onClick={() => setApiKeyOverride("")} className="text-xs text-slate-400 hover:text-red-500">지우기</button>}
+              </div>
             </div>
           )}
         </div>
