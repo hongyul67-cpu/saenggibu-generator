@@ -111,7 +111,9 @@ const validItemSet = (track, grade) => new Set(getCategories(track, grade).flatM
 const ACTIVITY_GENERAL = ["토론", "발표", "탐구활동", "실험", "프로젝트", "보고서 작성", "모둠활동", "자료조사", "독서·서평", "질의응답"];
 const ACTIVITY_NCS = ["실습", "직무 수행", "과제 수행", "장비·기기 운용", "도면·문서 작성", "작품·결과물 제작", "안전관리", "품질관리", "협업 실무", "현장 적용"];
 const TEACHER_PERSPECTIVES = ["성장·변화 중시", "산출물·기능 숙련도 중심", "진로 연계 부각", "협업 역할 강조", "구체적 사례 중심", "핵심 역량 부각", "자기주도성 강조", "인성·태도 부각"];
-const LEVELS = ["주도적", "적극적", "보통", "미흡"];
+const LEVELS = ["주도적", "적극적", "보통", "미흡", "미참여"];
+// 참여 수준별 기본 글자수(바이트). 낮을수록 짧게. 화면에서 조정 가능.
+const LEVEL_LIMIT_DEFAULT = { 주도적: 1200, 적극적: 900, 보통: 700, 미흡: 500, 미참여: 300 };
 const MAX_SUB_STUDENTS = 25;
 
 /* ============================================================
@@ -124,6 +126,32 @@ function countBytes(str, mode) {
 }
 function approxChars(byteLimit, byteMode) {
   return Math.floor(byteLimit / (byteMode === 3 ? 2.4 : 1.7));
+}
+// 결과가 제한을 넘으면 한도 이내에서 '마지막 완성 문장'까지만 남기고 잘라냄(넘긴 채로 저장되지 않도록).
+function trimToByteLimit(text, limit, mode) {
+  const t = (text || "").trim();
+  if (!limit || countBytes(t, mode) <= limit) return t;
+  // 한도 이하가 되는 최대 길이로 컷
+  let cut = t.length;
+  while (cut > 0 && countBytes(t.slice(0, cut), mode) > limit) cut -= 1;
+  const s = t.slice(0, cut);
+  // 마지막 문장 종결 지점 찾기: 마침표(.!?) 또는 명사형 종결(…음/함/임/됨/힘/봄/옴) + 공백/끝
+  const ENDERS = "음함임됨힘봄옴";
+  let best = -1;
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    if (ch === "." || ch === "!" || ch === "?") best = i;
+    else if (ENDERS.includes(ch)) {
+      const next = s[i + 1];
+      if (next === undefined || next === " " || next === "." || next === "\n") best = i;
+    }
+  }
+  if (best >= 0) {
+    let out = s.slice(0, best + 1).trim();
+    if (!/[.!?]$/.test(out)) out += "."; // 종결부호 보정
+    return out;
+  }
+  return s.trim(); // 문장 경계를 못 찾으면 하드 컷
 }
 function joinList(arr, etc) {
   const all = [...(arr || [])];
@@ -208,8 +236,9 @@ function buildBehaviorPrompt({ track, grade, checks, memo, byteLimit, byteMode, 
   return L.join("\n");
 }
 
-function buildSubjectPrompt({ subject, student, byteMode, guidelines }) {
-  const { name, type, standard, activities, activityEtc, commonActivity, evalMemo, byteLimit } = subject;
+function buildSubjectPrompt({ subject, student, byteMode, guidelines, byteLimit }) {
+  const { name, type, standard, activities, activityEtc, commonActivity, evalMemo } = subject;
+  const lim = byteLimit || subject.byteLimit;
   const isNcs = type === "ncs";
   const teacher = joinList(subject.teacherChecks, subject.teacherEtc);
   const acts = joinList(activities, activityEtc);
@@ -237,12 +266,32 @@ function buildSubjectPrompt({ subject, student, byteMode, guidelines }) {
   L.push(isNcs
     ? `3. NCS 전문교과이므로 직무 수행·기능 숙련 중심으로 서술('~을 능숙하게 수행함','~기능을 익혀 적용함' 등).`
     : `3. 일반 교과이므로 탐구·사고·개념 이해 과정을 중심으로 서술.`);
-  L.push(`4. 참여 수준에 맞춰 톤을 차등할 것: '주도적/적극적'은 능동성과 구체적 기여를 부각, '보통'은 과장 없이 사실 위주로 담백하게, '미흡'은 부정적 낙인 없이 기본적 참여와 성장 가능성 위주로 절제하여 서술.`);
+  L.push(`4. 참여 수준에 맞춰 톤과 분량을 차등할 것: '주도적/적극적'은 능동성과 구체적 기여를 부각, '보통'은 과장 없이 사실 위주로 담백하게, '미흡'은 부정적 낙인 없이 기본적 참여와 성장 가능성 위주로 절제하여, '미참여'는 수업 참여가 저조하였음을 사실 위주로 간결하고 완곡하게(비난·낙인 없이) 짧게 서술.`);
   L.push(`5. 활동 유형과 공통 활동을 배경으로 삼되, 개별 메모로 그 학생만의 모습이 드러나게 함. 비어 있는 정보는 자연스럽게 생략.`);
   if (teacher) L.push(`6. 위 '작성 방향'을 반영하여 서술 초점을 맞출 것.`);
-  L.push(`${teacher ? 7 : 6}. 분량은 약 ${byteLimit}바이트(한글 기준 약 ${approxChars(byteLimit, byteMode)}자) 이내. 완성된 세특 문단만 출력하고 머리말·제목·따옴표·번호는 붙이지 말 것.`);
+  L.push(`${teacher ? 7 : 6}. 분량은 반드시 ${lim}바이트(한글 기준 약 ${approxChars(lim, byteMode)}자)를 넘지 말 것. 완성된 세특 문단만 출력하고 머리말·제목·따옴표·번호는 붙이지 말 것.`);
   L.push(``);
   L.push(`세부능력 및 특기사항:`);
+  return L.join("\n");
+}
+
+// 자동 기록/합산된 결과를 뜻은 유지하고 표현만 살짝 바꿔(학생마다 다르게) 다듬는 프롬프트
+function buildVariationPrompt({ text, byteLimit, byteMode, guidelines }) {
+  const L = [];
+  L.push(`당신은 한국 고등학교 교사로서 학교생활기록부 '세부능력 및 특기사항' 문장을 다듬는 전문가입니다.`);
+  L.push(`아래 초안의 사실·의미는 그대로 유지하되, 표현과 문장 구조를 자연스럽게 바꿔 다른 학생과 겹치지 않게 다시 써 주세요.\n`);
+  const gb = guidelineBlock(guidelines);
+  if (gb) L.push(gb);
+  L.push(`[초안]`);
+  L.push(text);
+  L.push(``);
+  L.push(`[작성 규칙]`);
+  L.push(`1. 초안에 없는 새로운 사실·수치·활동을 지어내지 말 것(의미 보존, 표현만 변형).`);
+  L.push(`2. 세특 문체 유지: '~함','~을 보임','~을 수행함' 등 명사형/음슴체, 제3자 시점, 1인칭·경어체 금지.`);
+  L.push(`3. 분량은 반드시 ${byteLimit}바이트(한글 기준 약 ${approxChars(byteLimit, byteMode)}자)를 넘지 말 것.`);
+  L.push(`4. 완성된 문단만 출력하고 머리말·제목·따옴표·번호는 붙이지 말 것.`);
+  L.push(``);
+  L.push(`다듬은 세부능력 및 특기사항:`);
   return L.join("\n");
 }
 
@@ -262,11 +311,12 @@ const newSubStudent = (name = "", number = "") => ({
   picks: {},    // 활동 주제별: { [topicId]: 수준 }
 });
 const newCoTeacher = (name = "") => ({ id: uid(), name, limit: 500 });
-const newTopic = (name = "") => ({ id: uid(), name, levels: { 주도적: "", 적극적: "", 보통: "", 미흡: "" } });
+const newTopic = (name = "") => ({ id: uid(), name, levels: { 주도적: "", 적극적: "", 보통: "", 미흡: "", 미참여: "" } });
 const newSubject = (name = "") => ({
   id: uid(), name, type: "general", standard: "",
   activities: [], activityEtc: "", commonActivity: "", evalMemo: "",
-  teacherChecks: [], teacherEtc: "", byteLimit: 1500,
+  teacherChecks: [], teacherEtc: "", byteLimit: 1000,
+  levelMode: true, levelLimits: { ...LEVEL_LIMIT_DEFAULT }, // 참여 수준별 글자수 자동 조정
   coTeaching: false, coTeachers: [],
   topicMode: false, topics: [],
   students: [newSubStudent()],
@@ -277,6 +327,11 @@ const mergeSegments = (teachers, segments) =>
 // 활동 주제별: 학생이 주제마다 고른 수준의 내용을 순서대로 빈 칸 1칸으로 이어붙임
 const compileTopics = (topics, picks) =>
   (topics || []).map((t) => { const lv = picks?.[t.id]; return lv ? (t.levels?.[lv] || "").trim() : ""; }).filter(Boolean).join(" ");
+// 학생별 실제 글자수 제한: 참여 수준별 자동 조정이 켜져 있으면 수준별 한도, 아니면 과목 기준 제한
+const subLimitFor = (sub, st) => {
+  if (sub.coTeaching || sub.topicMode) return sub.byteLimit;
+  return sub.levelMode ? (sub.levelLimits?.[st.level] ?? sub.byteLimit) : sub.byteLimit;
+};
 
 /* ============================================================
    공용 컴포넌트
@@ -420,7 +475,7 @@ function TeacherPerspective({ checks, etc, onChecks, onEtc }) {
 function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model }) {
   const [track, setTrack] = useState("tech");
   const [grade, setGrade] = useState(1);
-  const [byteLimit, setByteLimit] = useState(1500);
+  const [byteLimit, setByteLimit] = useState(1000);
   const [teacherChecks, setTeacherChecks] = useState([]);
   const [teacherEtc, setTeacherEtc] = useState("");
   const [view, setView] = useState("card");
@@ -449,7 +504,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
       const teacher = joinList(teacherChecks, teacherEtc);
       const prompt = buildBehaviorPrompt({ track, grade, checks, memo: s.memo, byteLimit, byteMode, teacher, guidelines });
       const text = await generateText(prompt, apiKeyOverride, maxTokensFor(byteLimit), model);
-      patch(id, { result: text, status: "done" });
+      patch(id, { result: trimToByteLimit(text, byteLimit, byteMode), status: "done" });
     } catch (e) { patch(id, { status: "error", error: e.message || "생성 실패" }); }
   };
   const genAll = async () => {
@@ -608,9 +663,16 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
 /* ============================================================
    세특 탭
    ============================================================ */
-function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeachers, topicMode, topics, onChange, onRemove, onGenerate }) {
+function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeachers, topicMode, topics, onChange, onRemove, onGenerate, onVary }) {
   const bytes = countBytes(st.result, byteMode);
   const plain = !coTeaching && !topicMode;
+  const loading = st.status === "loading";
+  const VaryButton = () => (
+    <button onClick={onVary} disabled={loading || !st.result} title="자동 기록된 내용을 뜻은 유지한 채 AI로 살짝 다르게 다듬어 학생마다 다르게 만듭니다"
+      className="inline-flex items-center gap-1 rounded-md border border-teal-300 bg-white px-2.5 py-1 text-xs font-medium text-teal-700 hover:bg-teal-50 disabled:opacity-50">
+      {loading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} AI로 살짝 다르게
+    </button>
+  );
   const setSegment = (tid, text) => {
     const segments = { ...(st.segments || {}), [tid]: text };
     onChange({ segments, result: mergeSegments(coTeachers, segments) });
@@ -631,8 +693,8 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
               {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
             </select>
             <input value={st.memo} onChange={(e) => onChange({ memo: e.target.value })} placeholder="개별 메모·특이사항 (선택)" className="min-w-[140px] flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
-            <button onClick={onGenerate} disabled={st.status === "loading"} className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60">
-              {st.status === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            <button onClick={onGenerate} disabled={loading} className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60">
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}{loading ? "생성 중" : st.result ? "다시 생성" : "생성"}
             </button>
           </>
         )}
@@ -660,7 +722,10 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
             </div>
           )}
           <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-2.5">
-            <div className="mb-1 text-xs font-semibold text-teal-700">자동 기록 결과 <span className="font-normal text-slate-400">(선택한 주제·수준 내용을 이어붙임 · 직접 수정 가능)</span></div>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-teal-700">자동 기록 결과 <span className="font-normal text-slate-400">(주제·수준 내용을 이어붙임 · 직접 수정 가능)</span></div>
+              <VaryButton />
+            </div>
             <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={3} placeholder="주제별 수준을 선택하면 자동으로 기록됩니다"
               limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id + "topic"} />
             <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
@@ -687,7 +752,10 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
             })
           )}
           <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-2.5">
-            <div className="mb-1 text-xs font-semibold text-teal-700">자동 합산 결과 <span className="font-normal text-slate-400">(내용 있는 교사만 빈 칸 1칸으로 이어붙임)</span></div>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-teal-700">자동 합산 결과 <span className="font-normal text-slate-400">(내용 있는 교사만 빈 칸 1칸으로 이어붙임)</span></div>
+              <VaryButton />
+            </div>
             <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={3} placeholder="교사별 내용을 입력하면 자동으로 합쳐집니다 (직접 수정 가능)"
               limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id + "merged"} />
             <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
@@ -762,15 +830,33 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
     patchSubject(active.id, { topicMode: on, topics, coTeaching: on ? false : active.coTeaching });
   };
 
+  const toggleLevelMode = () => patchSubject(active.id, { levelMode: !active.levelMode });
+  const patchLevelLimit = (level, val) =>
+    patchSubject(active.id, { levelLimits: { ...(active.levelLimits || LEVEL_LIMIT_DEFAULT), [level]: Math.max(0, Number(val) || 0) } });
+
   const genStudent = async (sid, stid) => {
     const sub = ref.current.find((s) => s.id === sid); if (!sub) return;
     if (sub.coTeaching || sub.topicMode) return; // 공동 교과·활동 주제별은 직접 입력/선택 → AI 생성 미사용
     const st = sub.students.find((x) => x.id === stid); if (!st) return;
+    const lim = subLimitFor(sub, st);
     patchStudent(sid, stid, { status: "loading", error: null });
     try {
-      const prompt = buildSubjectPrompt({ subject: sub, student: st, byteMode, guidelines });
-      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(sub.byteLimit), model);
-      patchStudent(sid, stid, { result: text, status: "done" });
+      const prompt = buildSubjectPrompt({ subject: sub, student: st, byteMode, guidelines, byteLimit: lim });
+      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(lim), model);
+      patchStudent(sid, stid, { result: trimToByteLimit(text, lim, byteMode), status: "done" });
+    } catch (e) { patchStudent(sid, stid, { status: "error", error: e.message || "생성 실패" }); }
+  };
+  // 자동 기록/합산 결과를 AI로 살짝 다르게 다듬기(공동 교과·활동 주제별에서 학생마다 다르게)
+  const genVariation = async (sid, stid) => {
+    const sub = ref.current.find((s) => s.id === sid); if (!sub) return;
+    const st = sub.students.find((x) => x.id === stid); if (!st) return;
+    const base = (st.result || "").trim(); if (!base) return;
+    const lim = subLimitFor(sub, st);
+    patchStudent(sid, stid, { status: "loading", error: null });
+    try {
+      const prompt = buildVariationPrompt({ text: base, byteLimit: lim, byteMode, guidelines });
+      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(lim), model);
+      patchStudent(sid, stid, { result: trimToByteLimit(text, lim, byteMode), status: "done" });
     } catch (e) { patchStudent(sid, stid, { status: "error", error: e.message || "생성 실패" }); }
   };
   const genAll = async () => {
@@ -807,11 +893,12 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
     subjects.forEach((sub, si) => {
       const rows = sub.students.map((st, i) => {
         const b = countBytes(st.result, byteMode);
+        const lim = subLimitFor(sub, st);
         return { "번호": st.number || i + 1, "이름": st.name || "", "과목": sub.name || `과목${si + 1}`, "참여수준": st.level,
-          "세부능력 및 특기사항": st.result || "", [`글자수(${byteMode}B)`]: b, "제한초과": st.result && b > sub.byteLimit ? "O" : "" };
+          "세부능력 및 특기사항": st.result || "", [`글자수(${byteMode}B)`]: b, "제한": lim, "제한초과": st.result && b > lim ? "O" : "" };
       });
       const ws = XLSX.utils.json_to_sheet(rows);
-      ws["!cols"] = [{ wch: 6 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 90 }, { wch: 12 }, { wch: 8 }];
+      ws["!cols"] = [{ wch: 6 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 90 }, { wch: 12 }, { wch: 8 }, { wch: 8 }];
       let nm = (sub.name || `과목${si + 1}`).replace(/[\\/?*[\]:]/g, "").slice(0, 26) || `과목${si + 1}`;
       let base = nm, k = 2; while (used.has(nm)) { nm = `${base}_${k++}`; } used.add(nm);
       XLSX.utils.book_append_sheet(wb, ws, nm);
@@ -859,10 +946,16 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
             <input value={active.name} onChange={(e) => patchSubject(active.id, { name: e.target.value })} placeholder="예: 전기회로, 화학Ⅰ" className="w-40 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
           </label>
           <label className="flex items-center gap-2 text-sm">
-            <span className="text-slate-500">제한</span>
+            <span className="text-slate-500">{active.levelMode && !active.coTeaching && !active.topicMode ? "기준 제한" : "제한"}</span>
             <input type="number" value={active.byteLimit} min={0} step={100} onChange={(e) => patchSubject(active.id, { byteLimit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
             <span className="text-slate-400 text-xs">바이트</span>
           </label>
+          {!active.coTeaching && !active.topicMode && (
+            <label className="flex items-center gap-2 text-sm" title="참여 수준(성적)에 따라 글자수 제한을 자동으로 다르게 적용">
+              <input type="checkbox" checked={active.levelMode} onChange={toggleLevelMode} className="h-4 w-4 accent-teal-600" />
+              <span className="text-slate-600">수준별 글자수 <span className="text-slate-400 text-xs">(참여·성적별 자동 조정)</span></span>
+            </label>
+          )}
           <label className="flex items-center gap-2 text-sm" title="한 과목을 여러 교사가 단원별로 나눠 가르칠 때">
             <input type="checkbox" checked={active.coTeaching} onChange={toggleCoTeaching} className="h-4 w-4 accent-teal-600" />
             <span className="text-slate-600">공동 교과 <span className="text-slate-400 text-xs">(단원 분담·자동 합산)</span></span>
@@ -872,6 +965,22 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
             <span className="text-slate-600">활동 주제별 <span className="text-slate-400 text-xs">(수준별 선택·자동 기록)</span></span>
           </label>
         </div>
+
+        {active.levelMode && !active.coTeaching && !active.topicMode && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <div className="mb-1.5 text-xs font-semibold text-teal-700">참여 수준별 글자수 제한(바이트) <span className="font-normal text-slate-400">(미참여·저조 학생은 더 짧게 · 직접 조정 가능)</span></div>
+            <div className="flex flex-wrap gap-2">
+              {LEVELS.map((lv) => (
+                <label key={lv} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                  <span className="font-medium">{lv}</span>
+                  <input type="number" min={0} step={50} value={(active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] ?? ""} onChange={(e) => patchLevelLimit(lv, e.target.value)}
+                    className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-sm focus:border-teal-500 focus:outline-none" />
+                </label>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-slate-400">학생별 ‘참여 수준’에 따라 위 제한이 자동 적용되고, 생성 결과가 제한을 넘으면 문장 단위로 잘려 마무리됩니다.</p>
+          </div>
+        )}
 
         {active.topicMode && (
           <div className="mt-3 border-t border-slate-100 pt-3">
@@ -990,10 +1099,11 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
 
       <div className="space-y-2.5">
         {active.students.map((st, i) => (
-          <SubjectStudentRow key={st.id} st={st} idx={i} byteMode={byteMode} byteLimit={active.byteLimit}
+          <SubjectStudentRow key={st.id} st={st} idx={i} byteMode={byteMode} byteLimit={subLimitFor(active, st)}
             coTeaching={active.coTeaching} coTeachers={active.coTeachers || []}
             topicMode={active.topicMode} topics={active.topics || []}
-            onChange={(p) => patchStudent(active.id, st.id, p)} onRemove={() => removeStudent(st.id)} onGenerate={() => genStudent(active.id, st.id)} />
+            onChange={(p) => patchStudent(active.id, st.id, p)} onRemove={() => removeStudent(st.id)}
+            onGenerate={() => genStudent(active.id, st.id)} onVary={() => genVariation(active.id, st.id)} />
         ))}
       </div>
     </div>
@@ -1305,13 +1415,17 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <label className="flex items-center gap-1.5 text-xs text-slate-500">
                   모델
-                  <input list="gemini-model-list" value={model} onChange={(e) => setModel(e.target.value)}
-                    placeholder={AI_CONFIG.gemini.model}
-                    className="w-56 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none" />
-                  <datalist id="gemini-model-list">
-                    {GEMINI_MODELS.map((m) => <option key={m} value={m} />)}
-                  </datalist>
+                  <select value={GEMINI_MODELS.includes(model) ? model : "__custom__"}
+                    onChange={(e) => { const v = e.target.value; setModel(v === "__custom__" ? "" : v); }}
+                    className="w-56 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none">
+                    {GEMINI_MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+                    <option value="__custom__">직접 입력…</option>
+                  </select>
                 </label>
+                {!GEMINI_MODELS.includes(model) && (
+                  <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="모델명 직접 입력 (예: gemini-2.5-flash)"
+                    className="w-56 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none" />
+                )}
                 {model !== AI_CONFIG.gemini.model && (
                   <button onClick={() => setModel(AI_CONFIG.gemini.model)} className="text-xs text-slate-400 hover:text-indigo-600">기본값({AI_CONFIG.gemini.model})</button>
                 )}
