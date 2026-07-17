@@ -68,40 +68,44 @@ const TRACK_LABELS = { humanities: "인문계", tech: "특성화고(공업계)",
 const TRACK_ORDER = ["humanities", "tech", "biz", "meister"];
 const isVoc = (t) => t !== "humanities";
 
-const COMMON = [
-  { group: "학습 태도", items: ["수업 집중도 우수", "과제 성실 수행", "자기주도 학습", "학업 열의", "탐구심"] },
-  { group: "생활 태도", items: ["규칙 준수", "출결 성실", "시간 약속 엄수", "바른 언어 사용", "정직함"] },
-  { group: "대인 관계", items: ["협동심", "배려심", "리더십", "갈등 조율", "원만한 교우관계"] },
-  { group: "인성·태도", items: ["책임감", "예의·인사성", "긍정적 태도", "끈기·인내", "봉사 정신"] },
-];
-const VOC = [
-  { group: "전공·실습", items: ["실습 적극 참여", "안전수칙 준수", "공구·장비 관리", "실습실 정리정돈", "실습 집중도"] },
-  { group: "진로·자격", items: ["자격증 취득 노력", "뚜렷한 진로목표", "전공 역량 향상", "직무 관심도"] },
-];
-const MEISTER = [{ group: "산업체 마인드", items: ["직업윤리 의식", "현장 적응력", "산업체 이해도", "기술 숙련 의지"] }];
+// 항목은 "문자열"(모든 계열 공통) 또는 ["문자열", [자주 쓰는 계열들]] 형태.
+// 해당 계열에서 자주 쓰는 항목은 그룹 안에서 앞쪽으로, 특정 계열 전용인데 현재 계열이 아니면 뒤쪽으로 정렬.
+const _t = (it) => (Array.isArray(it) ? it[0] : it);
+const _pri = (it) => (Array.isArray(it) ? it[1] : null);
+function orderItems(items, track) {
+  const rank = (it) => { const pri = _pri(it); if (!pri) return 1; return pri.includes(track) ? 0 : 2; };
+  return items.map((it, i) => ({ t: _t(it), r: rank(it), i })).sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.t);
+}
+
+const V3 = ["tech", "biz", "meister"]; // 특성화·마이스터(직업계) 전체
+const G = {
+  study: { group: "학습 태도", items: ["수업 집중도 우수", "과제 성실 수행", "자기주도 학습", "학업 열의", "탐구심", "질문·발표 적극", "목표의식 뚜렷", "이해력 우수", "꾸준한 노력", ["예습·복습 습관", ["humanities"]], ["오답 정리 꼼꼼", ["humanities"]], ["지적 호기심", ["humanities"]]] },
+  life: { group: "생활 태도", items: ["규칙 준수", "출결 성실", "시간 약속 엄수", "바른 언어 사용", "정직함", "청결·정리정돈", "준비물 잘 챙김", "절제력", "기본생활습관 우수"] },
+  social: { group: "대인 관계", items: ["협동심", "배려심", "리더십", "갈등 조율", "원만한 교우관계", "경청 태도", "공감 능력", "나눔·양보", "소통 능력", "포용력"] },
+  character: { group: "인성·태도", items: ["책임감", "예의·인사성", "긍정적 태도", "끈기·인내", "봉사 정신", "성실성", "겸손함", "감사할 줄 앎", "도전 정신", "신뢰감"] },
+  vocPractice: { group: "전공·실습", items: [["실습 적극 참여", V3], ["안전수칙 준수", V3], ["실습 집중도", V3], ["실습실 정리정돈", V3], ["문제해결력", V3], ["공구·장비 관리", ["tech", "meister"]], ["기능 숙련도 우수", ["tech", "meister"]], ["작업 정확성", ["tech", "meister"]], ["매뉴얼 준수", ["tech", "meister"]], ["손재주 우수", ["tech"]]] },
+  vocCareer: { group: "진로·자격", items: [["자격증 취득 노력", V3], ["뚜렷한 진로목표", V3], ["전공 역량 향상", V3], ["직무 관심도", V3], ["현장실습 성실", V3], ["실무 감각", ["biz", "meister"]], ["전공 서적 탐독", ["tech", "biz"]]] },
+  meister: { group: "산업체 마인드", items: [["직업윤리 의식", ["meister"]], ["현장 적응력", ["meister"]], ["산업체 이해도", ["meister"]], ["기술 숙련 의지", ["meister"]], ["납기·품질 의식", ["meister"]], ["산학협력 적극", ["meister"]]] },
+};
 const GRADE = {
-  1: [{ group: "적응 (1학년)", items: ["학교생활 적응", "새 환경 적응력", "교우관계 형성", "기초 학습습관 형성", "자기관리 시작"] }],
-  2: [{ group: "자치·주도 (2학년)", items: ["학급 역할 수행", "동아리 활동 적극", "자치활동 참여", "후배 지도", "주도성 향상"] }],
-  3: {
-    humanities: [{ group: "진로·진학 (3학년)", items: ["뚜렷한 진학 목표", "수능 준비 성실", "진로 구체화", "면접·자소서 준비", "학업 마무리 충실"] }],
-    voc: [{ group: "진로·취업 (3학년)", items: ["취업 의지 확고", "현장실습 성실", "직업의식", "구직 활동 적극", "사회 진출 준비"] }],
-  },
+  1: { group: "적응 (1학년)", items: ["학교생활 적응", "새 환경 적응력", "교우관계 형성", "기초 학습습관 형성", "자기관리 시작", "규칙 이해·수용"] },
+  2: { group: "자치·주도 (2학년)", items: ["학급 역할 수행", "동아리 활동 적극", "자치활동 참여", "후배 지도", "주도성 향상", "책임 있는 역할 수행"] },
 };
-// 보완할 점(부정적·성장 방향) — 모든 계열·학년 공통. 프롬프트에서 완곡·건설적으로 서술하도록 처리.
+const GRADE3_HUM = { group: "진로·진학 (3학년)", items: ["뚜렷한 진학 목표", "수능 준비 성실", "진로 구체화", "면접·자소서 준비", "학업 마무리 충실", "전공 적합성 탐색"] };
+const GRADE3_VOC = { group: "진로·취업 (3학년)", items: ["취업 의지 확고", "현장실습 성실", "직업의식", "구직 활동 적극", "사회 진출 준비", "산업체 연계 활동"] };
+// 보완할 점(부정적·성장 방향) — 모든 계열·학년 공통(직업계 전용 항목은 뒤로). 프롬프트에서 완곡·건설적으로 서술.
 const IMPROVE = {
-  group: "보완할 점 (성장 방향)",
-  tone: "warn",
-  items: ["수업 집중 기복", "과제 제출 지연", "발표에 소극적", "자신감 부족", "정리정돈 미흡", "감정 조절 연습 필요", "교우관계 폭 좁음", "지각·결석 잦음", "끈기 부족"],
+  group: "보완할 점 (성장 방향)", tone: "warn",
+  items: ["수업 집중 기복", "과제 제출 지연", "발표에 소극적", "자신감 부족", "정리정돈 미흡", "감정 조절 연습 필요", "교우관계 폭 좁음", "지각·결석 잦음", "끈기 부족", "학습 동기 부족", "산만함", "준비물 미흡", "수업 참여 저조", "과제 완성도 부족", "자기표현 서투름", "협업 참여 소극", "시간 관리 미흡", "목표의식 부족", "책임감 보완 필요", "언어 습관 개선 필요", "스마트폰 사용 과다", "의욕 기복", "좌절 극복 연습 필요", "경청 태도 보완", "정서적 지지 필요", "규칙 준수 노력 필요", ["실습 안전 부주의", V3], ["기초 학력 보충 필요", V3], ["기능 숙련 보완 필요", ["tech", "meister"]]],
 };
-const NEGATIVE_SET = new Set(IMPROVE.items);
+const NEGATIVE_SET = new Set(IMPROVE.items.map(_t));
 function getCategories(track, grade) {
-  const list = [...COMMON];
-  if (isVoc(track)) list.push(...VOC);
-  if (track === "meister") list.push(...MEISTER);
-  if (grade === 3) list.push(...(isVoc(track) ? GRADE[3].voc : GRADE[3].humanities));
-  else list.push(...GRADE[grade]);
-  list.push(IMPROVE);
-  return list;
+  let order;
+  if (track === "humanities") order = [G.study, G.character, G.social, G.life];
+  else if (track === "meister") order = [G.vocPractice, G.meister, G.vocCareer, G.study, G.social, G.character, G.life];
+  else order = [G.vocPractice, G.vocCareer, G.study, G.social, G.character, G.life]; // 특성화(공업·상업)
+  const gradeGroup = grade === 3 ? (isVoc(track) ? GRADE3_VOC : GRADE3_HUM) : GRADE[grade];
+  return [...order, gradeGroup, IMPROVE].map((c) => ({ ...c, items: orderItems(c.items, track) }));
 }
 const validItemSet = (track, grade) => new Set(getCategories(track, grade).flatMap((c) => c.items));
 
@@ -202,10 +206,11 @@ function guidelineBlock(guidelines) {
 /* ============================================================
    프롬프트 빌더
    ============================================================ */
-function buildBehaviorPrompt({ track, grade, checks, memo, byteLimit, byteMode, teacher, guidelines }) {
+function buildBehaviorPrompt({ track, grade, checks, customChecks, memo, byteLimit, byteMode, teacher, guidelines }) {
   const trackLabel = TRACK_LABELS[track];
   const strengths = checks.filter((c) => !NEGATIVE_SET.has(c));
   const improves = checks.filter((c) => NEGATIVE_SET.has(c));
+  const customs = (customChecks || []).filter(Boolean);
   const L = [];
   L.push(`당신은 한국 고등학교 담임교사로서 학교생활기록부의 '행동특성 및 종합의견'을 작성하는 전문가입니다.`);
   L.push(`다음 정보를 바탕으로 한 학생의 행동특성 및 종합의견을 작성하세요.\n`);
@@ -216,6 +221,7 @@ function buildBehaviorPrompt({ track, grade, checks, memo, byteLimit, byteMode, 
   L.push(`- 학년: ${grade}학년`);
   L.push(`- 관찰된 강점(체크 항목): ${strengths.length ? strengths.join(", ") : "(선택된 항목 없음)"}`);
   if (improves.length) L.push(`- 보완·성장 필요(체크 항목): ${improves.join(", ")}`);
+  if (customs.length) L.push(`- 교사 직접 입력 키워드: ${customs.join(", ")}`);
   L.push(`- 교사 관찰 메모: ${memo && memo.trim() ? memo.trim() : "(없음)"}`);
   if (teacher) { L.push(``); L.push(`[작성 방향(교사 관점)]`); L.push(`- ${teacher}`); }
   L.push(``);
@@ -303,7 +309,7 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const maxTokensFor = (byteLimit) => Math.min(8192, Math.max(1024, byteLimit));
 
 const newBehaviorStudent = (name = "", number = "") => ({
-  id: uid(), name, number, checks: [], memo: "", result: "", status: "idle", error: null,
+  id: uid(), name, number, checks: [], customChecks: [], memo: "", result: "", status: "idle", error: null,
 });
 const newSubStudent = (name = "", number = "") => ({
   id: uid(), name, number, level: "보통", memo: "", result: "", status: "idle", error: null,
@@ -417,30 +423,72 @@ function LimitedTextarea({ value, onChange, limit, byteMode, rows = 4, placehold
   );
 }
 
-function CheckGroups({ track, grade, checks, onToggle }) {
+const CHIP_COLLAPSED = 8; // 접힘 상태에서 그룹당 기본 노출 개수
+function CheckGroups({ track, grade, checks, onToggle, customChecks = [], onCustom }) {
   const cats = useMemo(() => getCategories(track, grade), [track, grade]);
   const set = useMemo(() => new Set(checks), [checks]);
+  const [expanded, setExpanded] = useState({}); // { [group]: true }
+  const [customInput, setCustomInput] = useState("");
+  const custom = new Set(customChecks);
+
+  const addCustom = () => {
+    const vals = customInput.split(",").map((v) => v.trim()).filter(Boolean);
+    if (!vals.length || !onCustom) { setCustomInput(""); return; }
+    onCustom(Array.from(new Set([...customChecks, ...vals])));
+    setCustomInput("");
+  };
+
   return (
     <div className="space-y-3">
       {cats.map((cat) => {
         const warn = cat.tone === "warn";
+        const isOpen = !!expanded[cat.group];
+        // 접힘: 앞쪽 N개 + (그 밖에 이미 선택된 항목)만 노출
+        const shown = isOpen ? cat.items : cat.items.filter((it, i) => i < CHIP_COLLAPSED || set.has(it));
+        const hiddenCount = cat.items.length - shown.length;
+        const onCls = warn ? "bg-amber-500 border-amber-500 text-white" : "bg-indigo-600 border-indigo-600 text-white";
+        const offCls = warn ? "bg-white border-amber-300 text-amber-700 hover:border-amber-400" : "bg-white border-slate-300 text-slate-600 hover:border-indigo-400";
         return (
         <div key={cat.group}>
           <div className={`text-xs font-semibold mb-1.5 ${warn ? "text-amber-700" : "text-indigo-700"}`}>{cat.group}</div>
           <div className="flex flex-wrap gap-1.5">
-            {cat.items.map((item) => {
+            {shown.map((item) => {
               const on = set.has(item);
-              const onCls = warn ? "bg-amber-500 border-amber-500 text-white" : "bg-indigo-600 border-indigo-600 text-white";
-              const offCls = warn ? "bg-white border-amber-300 text-amber-700 hover:border-amber-400" : "bg-white border-slate-300 text-slate-600 hover:border-indigo-400";
               return (
                 <button key={item} onClick={() => onToggle(item)}
                   className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${on ? onCls : offCls}`}>{item}</button>
               );
             })}
+            {(hiddenCount > 0 || isOpen) && cat.items.length > CHIP_COLLAPSED && (
+              <button onClick={() => setExpanded((e) => ({ ...e, [cat.group]: !isOpen }))}
+                className="px-2.5 py-1 rounded-full text-xs border border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600">
+                {isOpen ? "접기 ▲" : `+${hiddenCount} 더보기 ▼`}
+              </button>
+            )}
           </div>
         </div>
         );
       })}
+      {/* 기타 직접 입력(사용자 키워드) */}
+      {onCustom && (
+        <div>
+          <div className="text-xs font-semibold text-slate-600 mb-1.5">기타 직접 입력 <span className="font-normal text-slate-400">(쉼표로 여러 개)</span></div>
+          {customChecks.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {customChecks.map((c) => (
+                <button key={c} onClick={() => onCustom(customChecks.filter((x) => x !== c))}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border bg-slate-700 border-slate-700 text-white">
+                  {c} <X size={11} />
+                </button>
+              ))}
+            </div>
+          )}
+          <input value={customInput} onChange={(e) => setCustomInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } }}
+            onBlur={addCustom} placeholder="직접 키워드 입력 후 Enter (예: 학급문고 관리, 리더십)"
+            className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
+        </div>
+      )}
     </div>
   );
 }
@@ -502,7 +550,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
       const valid = validItemSet(track, grade);
       const checks = s.checks.filter((c) => valid.has(c));
       const teacher = joinList(teacherChecks, teacherEtc);
-      const prompt = buildBehaviorPrompt({ track, grade, checks, memo: s.memo, byteLimit, byteMode, teacher, guidelines });
+      const prompt = buildBehaviorPrompt({ track, grade, checks, customChecks: s.customChecks, memo: s.memo, byteLimit, byteMode, teacher, guidelines });
       const text = await generateText(prompt, apiKeyOverride, maxTokensFor(byteLimit), model);
       patch(id, { result: trimToByteLimit(text, byteLimit, byteMode), status: "done" });
     } catch (e) { patch(id, { status: "error", error: e.message || "생성 실패" }); }
@@ -510,7 +558,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
   const genAll = async () => {
     setBusyAll(true);
     for (const s of ref.current) {
-      if (!s.name && s.checks.length === 0 && !s.memo) continue;
+      if (!s.name && s.checks.length === 0 && !(s.customChecks?.length) && !s.memo) continue;
       await genOne(s.id); await sleep(400);
     }
     setBusyAll(false);
@@ -611,12 +659,13 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
                   <input value={s.number} onChange={(e) => patch(s.id, { number: e.target.value })} placeholder="번호" className="w-14 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none" />
                   <input value={s.name} onChange={(e) => patch(s.id, { name: e.target.value })} placeholder="이름" className="w-28 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none" />
                   <div className="ml-auto flex items-center gap-3">
-                    <span className="text-xs text-slate-400">{s.checks.length}개</span>
+                    <span className="text-xs text-slate-400">{s.checks.length + (s.customChecks?.length || 0)}개</span>
                     <button onClick={() => removeStudent(s.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={16} /></button>
                   </div>
                 </div>
                 <CheckGroups track={track} grade={grade} checks={s.checks}
-                  onToggle={(item) => { const has = s.checks.includes(item); patch(s.id, { checks: has ? s.checks.filter((c) => c !== item) : [...s.checks, item] }); }} />
+                  onToggle={(item) => { const has = s.checks.includes(item); patch(s.id, { checks: has ? s.checks.filter((c) => c !== item) : [...s.checks, item] }); }}
+                  customChecks={s.customChecks || []} onCustom={(v) => patch(s.id, { customChecks: v })} />
                 <textarea value={s.memo} onChange={(e) => patch(s.id, { memo: e.target.value })} placeholder="자유 메모·키워드 (선택)" rows={2} className="mt-3 w-full resize-none rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none" />
                 <button onClick={() => genOne(s.id)} disabled={s.status === "loading"} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
                   {s.status === "loading" ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}{s.status === "loading" ? "생성 중…" : s.result ? "다시 생성" : "생성"}
