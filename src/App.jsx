@@ -355,7 +355,9 @@ const subLimitFor = (sub, st) => {
 /* ============================================================
    공용 컴포넌트
    ============================================================ */
-function ByteGauge({ bytes, limit }) {
+// 바이트 → 글자수(자) 환산: NEIS 기준 한글 1자 = byteMode바이트 (500자 = 1,500B)
+const toChars = (bytes, byteMode = 3) => Math.ceil(bytes / byteMode);
+function ByteGauge({ bytes, limit, byteMode = 3 }) {
   const pct = Math.min(100, limit ? (bytes / limit) * 100 : 0);
   const over = bytes > limit, near = !over && pct >= 80;
   const bar = over ? "bg-red-500" : near ? "bg-amber-500" : "bg-emerald-500";
@@ -365,7 +367,10 @@ function ByteGauge({ bytes, limit }) {
       <div className="h-1.5 flex-1 rounded-full bg-slate-200 overflow-hidden">
         <div className={`h-full ${bar} transition-all duration-300`} style={{ width: `${pct}%` }} />
       </div>
-      <span className={`text-xs font-medium tabular-nums ${txt}`}>{bytes}/{limit}B</span>
+      <span className={`text-xs font-medium tabular-nums ${txt}`} title={`${bytes}/${limit}바이트`}>
+        {toChars(bytes, byteMode)}/{toChars(limit, byteMode)}자
+        <span className="ml-1 font-normal opacity-60">({bytes}/{limit}B)</span>
+      </span>
     </div>
   );
 }
@@ -629,7 +634,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
     const rows = students.map((s, i) => {
       const b = countBytes(s.result, byteMode);
       return { "번호": s.number || i + 1, "이름": s.name || "", "계열": TRACK_LABELS[track], "학년": `${grade}학년`,
-        "행동특성 및 종합의견": s.result || "", [`글자수(${byteMode}B)`]: b, "제한초과": s.result && b > byteLimit ? "O" : "" };
+        "행동특성 및 종합의견": s.result || "", "글자수(자)": toChars(b, byteMode), "바이트": b, "제한초과": s.result && b > byteLimit ? "O" : "" };
     });
     const ws = XLSX.utils.json_to_sheet(rows);
     ws["!cols"] = [{ wch: 6 }, { wch: 10 }, { wch: 16 }, { wch: 8 }, { wch: 90 }, { wch: 12 }, { wch: 8 }];
@@ -665,7 +670,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
             <input type="number" value={byteLimit} min={0} step={100}
               onChange={(e) => setByteLimit(Math.max(0, Number(e.target.value) || 0))}
               className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none" />
-            <span className="text-slate-400 text-xs">바이트</span>
+            <span className="text-slate-400 text-xs">바이트 = {toChars(byteLimit, byteMode)}자</span>
           </label>
         </div>
         <div className="mt-3 border-t border-slate-100 pt-3">
@@ -739,7 +744,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
                     <LimitedTextarea value={s.result} onChange={(v) => patch(s.id, { result: v })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
                       limit={byteLimit} byteMode={byteMode} accent="indigo" seed={s.id} />
-                    <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={s.result} /></div>
+                    <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} byteMode={byteMode} /></div><CopyBtn text={s.result} /></div>
                   </div>
                 )}
               </div>
@@ -760,7 +765,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
                     <td className="px-3 py-2"><input value={s.number} onChange={(e) => patch(s.id, { number: e.target.value })} placeholder={String(i + 1)} className="w-10 rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-indigo-500 focus:outline-none" /></td>
                     <td className="px-3 py-2"><input value={s.name} onChange={(e) => patch(s.id, { name: e.target.value })} placeholder="이름" className="w-20 rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-indigo-500 focus:outline-none" /></td>
                     <td className="px-3 py-2"><LimitedTextarea value={s.result} onChange={(v) => patch(s.id, { result: v })} rows={3} placeholder={s.status === "loading" ? "생성 중…" : "생성 또는 직접 입력"} limit={byteLimit} byteMode={byteMode} accent="indigo" seed={s.id} /></td>
-                    <td className="px-3 py-2"><ByteGauge bytes={b} limit={byteLimit} /></td>
+                    <td className="px-3 py-2"><ByteGauge bytes={b} limit={byteLimit} byteMode={byteMode} /></td>
                     <td className="px-3 py-2"><button onClick={() => genOne(s.id)} disabled={s.status === "loading"} className="inline-flex items-center justify-center rounded-md bg-indigo-600 p-1.5 text-white hover:bg-indigo-700 disabled:opacity-50">{s.status === "loading" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}</button></td>
                   </tr>
                 );
@@ -841,7 +846,7 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
             </div>
             <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={3} placeholder="주제별 수준을 선택하면 자동으로 기록됩니다"
               limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id + "topic"} />
-            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} byteMode={byteMode} /></div><CopyBtn text={st.result} /></div>
           </div>
         </div>
       ) : coTeaching ? (
@@ -855,11 +860,11 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
                 <div key={t.id}>
                   <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-teal-700">
                     <span className="flex h-4 w-4 items-center justify-center rounded bg-teal-100 text-[10px] font-bold text-teal-700">{ti + 1}</span>
-                    {t.name || `교사 ${ti + 1}`}<span className="font-normal text-slate-400">· 제한 {t.limit}B</span>
+                    {t.name || `교사 ${ti + 1}`}<span className="font-normal text-slate-400">· 제한 {toChars(t.limit, byteMode)}자({t.limit}B)</span>
                   </div>
                   <LimitedTextarea value={val} onChange={(v) => setSegment(t.id, v)} rows={2}
                     placeholder={`${t.name || `교사 ${ti + 1}`} 담당 단원 내용`} limit={t.limit} byteMode={byteMode} accent="teal" seed={st.id + t.id} />
-                  <div className="mt-1"><ByteGauge bytes={countBytes(val, byteMode)} limit={t.limit} /></div>
+                  <div className="mt-1"><ByteGauge bytes={countBytes(val, byteMode)} limit={t.limit} byteMode={byteMode} /></div>
                 </div>
               );
             })
@@ -871,7 +876,7 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
             </div>
             <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={3} placeholder="교사별 내용을 입력하면 자동으로 합쳐집니다 (직접 수정 가능)"
               limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id + "merged"} />
-            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} byteMode={byteMode} /></div><CopyBtn text={st.result} /></div>
           </div>
         </div>
       ) : (
@@ -879,7 +884,7 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
           <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
             <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
               limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id} />
-            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} /></div><CopyBtn text={st.result} /></div>
+            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} byteMode={byteMode} /></div><CopyBtn text={st.result} /></div>
           </div>
         )
       )}
@@ -1008,7 +1013,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
         const b = countBytes(st.result, byteMode);
         const lim = subLimitFor(sub, st);
         return { "번호": st.number || i + 1, "이름": st.name || "", "과목": sub.name || `과목${si + 1}`, "참여수준": st.level,
-          "세부능력 및 특기사항": st.result || "", [`글자수(${byteMode}B)`]: b, "제한": lim, "제한초과": st.result && b > lim ? "O" : "" };
+          "세부능력 및 특기사항": st.result || "", "글자수(자)": toChars(b, byteMode), "바이트": b, "제한(자)": toChars(lim, byteMode), "제한초과": st.result && b > lim ? "O" : "" };
       });
       const ws = XLSX.utils.json_to_sheet(rows);
       ws["!cols"] = [{ wch: 6 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 90 }, { wch: 12 }, { wch: 8 }, { wch: 8 }];
@@ -1062,7 +1067,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
           <label className="flex items-center gap-2 text-sm">
             <span className="text-slate-500">{active.levelMode && !active.coTeaching && !active.topicMode ? "기준 제한" : "제한"}</span>
             <input type="number" value={active.byteLimit} min={0} step={100} onChange={(e) => patchSubject(active.id, { byteLimit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
-            <span className="text-slate-400 text-xs">바이트</span>
+            <span className="text-slate-400 text-xs">바이트 = {toChars(active.byteLimit, byteMode)}자</span>
           </label>
           {!active.coTeaching && !active.topicMode && (
             <label className="flex items-center gap-2 text-sm" title="참여 수준(성적)에 따라 글자수 제한을 자동으로 다르게 적용">
@@ -1082,13 +1087,14 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
 
         {active.levelMode && !active.coTeaching && !active.topicMode && (
           <div className="mt-3 border-t border-slate-100 pt-3">
-            <div className="mb-1.5 text-xs font-semibold text-teal-700">참여 수준별 글자수 제한(바이트) <span className="font-normal text-slate-400">(미참여·저조 학생은 더 짧게 · 직접 조정 가능)</span></div>
+            <div className="mb-1.5 text-xs font-semibold text-teal-700">참여 수준별 글자수 제한 <span className="font-normal text-slate-400">(미참여·저조 학생은 더 짧게 · 직접 조정 가능)</span></div>
             <div className="flex flex-wrap gap-2">
               {LEVELS.map((lv) => (
                 <label key={lv} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
                   <span className="font-medium">{lv}</span>
                   <input type="number" min={0} step={50} value={(active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] ?? ""} onChange={(e) => patchLevelLimit(lv, e.target.value)}
                     className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-sm focus:border-teal-500 focus:outline-none" />
+                  <span className="text-[10px] text-slate-400">= {toChars((active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] || 0, byteMode)}자</span>
                 </label>
               ))}
             </div>
@@ -1141,7 +1147,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
                   <label className="flex items-center gap-1 text-xs text-slate-500">
                     제한
                     <input type="number" value={t.limit} min={0} step={100} onChange={(e) => patchTeacher(t.id, { limit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
-                    바이트
+                    바이트 = {toChars(t.limit, byteMode)}자
                   </label>
                   {(active.coTeachers || []).length > 1 && (
                     <button onClick={() => removeTeacher(t.id)} className="text-slate-300 hover:text-red-500"><X size={14} /></button>
@@ -1355,7 +1361,7 @@ function ActivityTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
         const b = countBytes(st.result, byteMode);
         const lim = limFor(a, st);
         return { "번호": st.number || i + 1, "이름": st.name || "", "영역": a.label, "참여수준": st.level,
-          "특기사항": st.result || "", [`글자수(${byteMode}B)`]: b, "제한": lim, "제한초과": st.result && b > lim ? "O" : "" };
+          "특기사항": st.result || "", "글자수(자)": toChars(b, byteMode), "바이트": b, "제한(자)": toChars(lim, byteMode), "제한초과": st.result && b > lim ? "O" : "" };
       });
       const ws = XLSX.utils.json_to_sheet(rows);
       ws["!cols"] = [{ wch: 6 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 90 }, { wch: 12 }, { wch: 8 }, { wch: 8 }];
@@ -1393,7 +1399,7 @@ function ActivityTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
           <label className="flex items-center gap-2 text-sm">
             <span className="text-slate-500">{active.levelMode ? "기준 제한" : "제한"}</span>
             <input type="number" value={active.byteLimit} min={0} step={100} onChange={(e) => patchArea(active.key, { byteLimit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-purple-500 focus:outline-none" />
-            <span className="text-slate-400 text-xs">바이트</span>
+            <span className="text-slate-400 text-xs">바이트 = {toChars(active.byteLimit, byteMode)}자</span>
           </label>
           <label className="flex items-center gap-2 text-sm" title="참여 수준(성적)에 따라 글자수 제한을 자동으로 다르게 적용">
             <input type="checkbox" checked={active.levelMode} onChange={() => patchArea(active.key, { levelMode: !active.levelMode })} className="h-4 w-4 accent-purple-600" />
@@ -1403,13 +1409,14 @@ function ActivityTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
 
         {active.levelMode && (
           <div className="mt-3 border-t border-slate-100 pt-3">
-            <div className="mb-1.5 text-xs font-semibold text-purple-700">참여 수준별 글자수 제한(바이트) <span className="font-normal text-slate-400">(미참여·저조 학생은 더 짧게 · 직접 조정 가능)</span></div>
+            <div className="mb-1.5 text-xs font-semibold text-purple-700">참여 수준별 글자수 제한 <span className="font-normal text-slate-400">(미참여·저조 학생은 더 짧게 · 직접 조정 가능)</span></div>
             <div className="flex flex-wrap gap-2">
               {LEVELS.map((lv) => (
                 <label key={lv} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
                   <span className="font-medium">{lv}</span>
                   <input type="number" min={0} step={50} value={(active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] ?? ""} onChange={(e) => patchLevelLimit(lv, e.target.value)}
                     className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-sm focus:border-purple-500 focus:outline-none" />
+                  <span className="text-[10px] text-slate-400">= {toChars((active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] || 0, byteMode)}자</span>
                 </label>
               ))}
             </div>
@@ -1670,7 +1677,7 @@ export default function App() {
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white"><FileSpreadsheet size={18} /></div>
           <div>
             <h1 className="text-lg font-bold leading-tight">생기부 문장 생성기</h1>
-            <p className="text-xs text-slate-500">행동특성 · 세부능력 및 특기사항 · 글자수(바이트) 관리</p>
+            <p className="text-xs text-slate-500">행동특성 · 세특 · 창체 · 글자수(자) 관리</p>
           </div>
           {IS_DIST && (
             <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
