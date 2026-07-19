@@ -357,6 +357,22 @@ const subLimitFor = (sub, st) => {
    ============================================================ */
 // 바이트 → 글자수(자) 환산: NEIS 기준 한글 1자 = byteMode바이트 (500자 = 1,500B)
 const toChars = (bytes, byteMode = 3) => Math.ceil(bytes / byteMode);
+
+/* 글자수(자) 단위로 입력받는 제한 입력창.
+   - 내부 저장은 바이트(자 × byteMode), 표시는 자
+   - 값을 다 지우면 빈 칸 유지(앞자리 0이 남아 '0300'이 되는 문제 방지) */
+function CharLimitInput({ bytes, onBytes, byteMode, className, step = 50 }) {
+  const chars = bytes ? Math.round(bytes / byteMode) : 0;
+  return (
+    <input type="number" min={0} step={step} value={chars === 0 ? "" : chars} placeholder="0"
+      onChange={(e) => {
+        const v = e.target.value;
+        const n = v === "" ? 0 : Math.max(0, parseInt(v, 10) || 0);
+        onBytes(n * byteMode);
+      }}
+      className={className} />
+  );
+}
 function ByteGauge({ bytes, limit, byteMode = 3 }) {
   const pct = Math.min(100, limit ? (bytes / limit) * 100 : 0);
   const over = bytes > limit, near = !over && pct >= 80;
@@ -667,10 +683,9 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
           </label>
           <label className="flex items-center gap-2 text-sm">
             <span className="text-slate-500">제한</span>
-            <input type="number" value={byteLimit} min={0} step={100}
-              onChange={(e) => setByteLimit(Math.max(0, Number(e.target.value) || 0))}
+            <CharLimitInput bytes={byteLimit} onBytes={setByteLimit} byteMode={byteMode}
               className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none" />
-            <span className="text-slate-400 text-xs">바이트 = {toChars(byteLimit, byteMode)}자</span>
+            <span className="text-slate-400 text-xs">자 = {byteLimit}바이트</span>
           </label>
         </div>
         <div className="mt-3 border-t border-slate-100 pt-3">
@@ -1066,8 +1081,8 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
           </label>
           <label className="flex items-center gap-2 text-sm">
             <span className="text-slate-500">{active.levelMode && !active.coTeaching && !active.topicMode ? "기준 제한" : "제한"}</span>
-            <input type="number" value={active.byteLimit} min={0} step={100} onChange={(e) => patchSubject(active.id, { byteLimit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
-            <span className="text-slate-400 text-xs">바이트 = {toChars(active.byteLimit, byteMode)}자</span>
+            <CharLimitInput bytes={active.byteLimit} onBytes={(b) => patchSubject(active.id, { byteLimit: b })} byteMode={byteMode} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
+            <span className="text-slate-400 text-xs">자 = {active.byteLimit}바이트</span>
           </label>
           {!active.coTeaching && !active.topicMode && (
             <label className="flex items-center gap-2 text-sm" title="참여 수준(성적)에 따라 글자수 제한을 자동으로 다르게 적용">
@@ -1092,9 +1107,9 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
               {LEVELS.map((lv) => (
                 <label key={lv} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
                   <span className="font-medium">{lv}</span>
-                  <input type="number" min={0} step={50} value={(active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] ?? ""} onChange={(e) => patchLevelLimit(lv, e.target.value)}
+                  <CharLimitInput bytes={(active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] || 0} onBytes={(b) => patchLevelLimit(lv, b)} byteMode={byteMode}
                     className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-sm focus:border-teal-500 focus:outline-none" />
-                  <span className="text-[10px] text-slate-400">= {toChars((active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] || 0, byteMode)}자</span>
+                  <span className="text-[10px] text-slate-400">자</span>
                 </label>
               ))}
             </div>
@@ -1146,8 +1161,8 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
                   <input value={t.name} onChange={(e) => patchTeacher(t.id, { name: e.target.value })} placeholder={`교사 ${ti + 1} 이름/단원`} className="w-44 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
                   <label className="flex items-center gap-1 text-xs text-slate-500">
                     제한
-                    <input type="number" value={t.limit} min={0} step={100} onChange={(e) => patchTeacher(t.id, { limit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
-                    바이트 = {toChars(t.limit, byteMode)}자
+                    <CharLimitInput bytes={t.limit} onBytes={(b) => patchTeacher(t.id, { limit: b })} byteMode={byteMode} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-teal-500 focus:outline-none" />
+                    자 = {t.limit}바이트
                   </label>
                   {(active.coTeachers || []).length > 1 && (
                     <button onClick={() => removeTeacher(t.id)} className="text-slate-300 hover:text-red-500"><X size={14} /></button>
@@ -1398,8 +1413,8 @@ function ActivityTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
           )}
           <label className="flex items-center gap-2 text-sm">
             <span className="text-slate-500">{active.levelMode ? "기준 제한" : "제한"}</span>
-            <input type="number" value={active.byteLimit} min={0} step={100} onChange={(e) => patchArea(active.key, { byteLimit: Math.max(0, Number(e.target.value) || 0) })} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-purple-500 focus:outline-none" />
-            <span className="text-slate-400 text-xs">바이트 = {toChars(active.byteLimit, byteMode)}자</span>
+            <CharLimitInput bytes={active.byteLimit} onBytes={(b) => patchArea(active.key, { byteLimit: b })} byteMode={byteMode} className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-purple-500 focus:outline-none" />
+            <span className="text-slate-400 text-xs">자 = {active.byteLimit}바이트</span>
           </label>
           <label className="flex items-center gap-2 text-sm" title="참여 수준(성적)에 따라 글자수 제한을 자동으로 다르게 적용">
             <input type="checkbox" checked={active.levelMode} onChange={() => patchArea(active.key, { levelMode: !active.levelMode })} className="h-4 w-4 accent-purple-600" />
@@ -1414,9 +1429,9 @@ function ActivityTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
               {LEVELS.map((lv) => (
                 <label key={lv} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
                   <span className="font-medium">{lv}</span>
-                  <input type="number" min={0} step={50} value={(active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] ?? ""} onChange={(e) => patchLevelLimit(lv, e.target.value)}
+                  <CharLimitInput bytes={(active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] || 0} onBytes={(b) => patchLevelLimit(lv, b)} byteMode={byteMode}
                     className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-sm focus:border-purple-500 focus:outline-none" />
-                  <span className="text-[10px] text-slate-400">= {toChars((active.levelLimits || LEVEL_LIMIT_DEFAULT)[lv] || 0, byteMode)}자</span>
+                  <span className="text-[10px] text-slate-400">자</span>
                 </label>
               ))}
             </div>
