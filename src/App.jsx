@@ -22,8 +22,36 @@ const AI_CONFIG = {
     model: "gemini-flash-latest",
   },
 };
-// 화면 선택용 후보 모델(위에서부터 최신·권장). 목록에 없어도 직접 입력 가능.
-const GEMINI_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+// 화면 선택용 후보 모델(키로 실제 목록을 못 불러올 때의 예비). 목록에 없어도 직접 입력 가능.
+const GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-lite-latest", "gemini-1.5-flash"];
+
+// 키로 실제 사용 가능한 모델 목록을 불러옴(generateContent 지원 + 텍스트용만).
+async function fetchGeminiModels(apiKey) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=1000`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`모델 목록 조회 실패 ${res.status} · ${t.slice(0, 160)}`);
+  }
+  const data = await res.json();
+  const exclude = /embedding|aqa|image|imagen|vision|tts|audio|veo|learnlm/i;
+  return (data.models || [])
+    .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+    .map((m) => (m.name || "").replace(/^models\//, ""))
+    .filter((id) => id && !exclude.test(id));
+}
+// 목록에서 문장 생성에 가장 적합한(안정적인 flash) 모델을 자동 선택.
+function preferGeminiModel(list, current) {
+  if (current && list.includes(current)) return current;
+  const bad = /preview|exp|thinking|latest|lite|-8b|1\.5/i;
+  const byVerDesc = (a, b) => b.localeCompare(a, undefined, { numeric: true });
+  const stableFlash = list.filter((m) => /flash/i.test(m) && !bad.test(m)).sort(byVerDesc);
+  if (stableFlash.length) return stableFlash[0];
+  const anyFlash = list.filter((m) => /flash/i.test(m) && !/embedding/i.test(m)).sort(byVerDesc);
+  if (anyFlash.length) return anyFlash[0];
+  const anyPro = list.filter((m) => /pro/i.test(m) && !/preview|exp/i.test(m)).sort(byVerDesc);
+  return anyPro[0] || list[0] || "";
+}
 
 async function callGemini(prompt, apiKey, model, maxTokens) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -1656,6 +1684,9 @@ export default function App() {
   const [rememberKey, setRememberKey] = useState(() => !!readStoredKey());
   const [showKey, setShowKey] = useState(() => IS_DIST && !readStoredKey());
   const [model, setModel] = useState(readStoredModel);
+  const [availableModels, setAvailableModels] = useState([]); // 키로 불러온 실제 사용 가능 모델
+  const [modelStatus, setModelStatus] = useState("idle"); // idle | loading | done | error
+  const [modelError, setModelError] = useState("");
 
   // 생기부 작성요령(기본 숨김 · 원하면 열어서 확인/편집)
   const [guidelines, setGuidelines] = useState(readStoredGuide);
@@ -1683,6 +1714,31 @@ export default function App() {
     const k = apiKeyOverride || AI_CONFIG.gemini.apiKey;
     return k && k !== "YOUR_GEMINI_API_KEY";
   })();
+  const activeKey = apiKeyOverride || AI_CONFIG.gemini.apiKey;
+
+  // 키로 실제 사용 가능한 모델 목록을 불러와, 현재 모델이 없으면 되는 모델로 자동 전환
+  const loadModels = async (key) => {
+    if (!key || key === "YOUR_GEMINI_API_KEY") return;
+    setModelStatus("loading"); setModelError("");
+    try {
+      const list = await fetchGeminiModels(key);
+      setAvailableModels(list);
+      setModelStatus("done");
+      // 현재 모델이 목록에 없으면(=그 키로 못 쓰면) 되는 모델로 자동 교체
+      if (list.length && !list.includes(model)) setModel(preferGeminiModel(list, model));
+    } catch (e) {
+      setModelStatus("error"); setModelError(e.message || "모델 목록을 불러오지 못했습니다.");
+    }
+  };
+  // 키가 설정/변경되면 자동으로 모델 목록 조회(디바운스)
+  useEffect(() => {
+    if (!keyConfigured) { setAvailableModels([]); setModelStatus("idle"); return; }
+    const t = setTimeout(() => loadModels(activeKey), 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey, keyConfigured]);
+
+  const modelOptions = availableModels.length ? availableModels : GEMINI_MODELS;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800">
@@ -1789,40 +1845,46 @@ export default function App() {
                       Google AI Studio 키 발급 페이지 <ExternalLink size={11} />
                     </a>{" "}열기 (구글 계정 로그인)
                   </li>
-                  <li><b>Create API key</b>(API 키 만들기) 클릭 → 프로젝트 선택/생성하면 <code className="rounded bg-white px-1">AIza…</code>로 시작하는 키가 만들어집니다.</li>
+                  <li><b>API 키 만들기</b> 클릭 → 프로젝트는 <b>Default Gemini Project</b>(또는 ‘프로젝트 만들기’)를 그대로 선택하면 키가 생성됩니다. 키는 <code className="rounded bg-white px-1">AIza…</code> 또는 <code className="rounded bg-white px-1">AQ.…</code>로 시작합니다.</li>
                   <li>키 오른쪽 <b>복사</b> 버튼을 눌러 복사합니다.</li>
                   <li>아래 칸에 <b>붙여넣기</b>(Ctrl/⌘+V) → 오른쪽에 <span className="text-emerald-600 font-medium">● 사용 가능</span>이 뜨면 완료!</li>
                   <li>같은 브라우저에서 계속 쓰려면 <b>‘이 브라우저에 저장’</b>을 체크하세요(다음에 다시 입력 안 해도 됩니다).</li>
                 </ol>
-                <p className="mt-1.5 text-[11px] text-slate-400">키는 구글(생성 요청)로만 전송되고 별도 서버에 저장되지 않아요. 무료 등급으로도 충분히 사용할 수 있습니다.</p>
+                <p className="mt-1.5 text-[11px] text-amber-600">⚠ <b>학교(교육청) 구글 계정</b>은 관리자가 AI Studio를 막아둔 경우가 많아 “액세스할 수 없습니다”가 뜹니다. 이럴 땐 <b>개인 Gmail 계정</b>으로 로그인해 발급하세요.</p>
+                <p className="mt-1 text-[11px] text-slate-400">키는 구글(생성 요청)로만 전송되고 별도 서버에 저장되지 않아요. 무료 등급으로도 충분히 사용할 수 있습니다.</p>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <input type="password" value={apiKeyOverride} onChange={(e) => setApiKeyOverride(e.target.value)} placeholder="여기에 Gemini API 키 붙여넣기 (AIza… 로 시작)" className="min-w-[200px] flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
+                <input type="password" value={apiKeyOverride} onChange={(e) => setApiKeyOverride(e.target.value)} placeholder="여기에 Gemini API 키 붙여넣기 (AIza… 또는 AQ.… 로 시작)" className="min-w-[200px] flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-indigo-500 focus:outline-none" />
                 <span className={`text-xs ${keyConfigured ? "text-emerald-600" : "text-slate-400"}`}>{keyConfigured ? "● 사용 가능" : "○ 미설정"}</span>
                 <label className="inline-flex items-center gap-1.5 text-xs text-slate-500" title="끄면 새로고침 시 키가 사라집니다">
                   <input type="checkbox" checked={rememberKey} onChange={(e) => setRememberKey(e.target.checked)} className="accent-indigo-600" /> 이 브라우저에 저장
                 </label>
                 {apiKeyOverride && <button onClick={() => setApiKeyOverride("")} className="text-xs text-slate-400 hover:text-red-500">지우기</button>}
               </div>
-              {/* 모델 선택(고급) — 구글이 모델을 바꾸면 여기서 교체 */}
+              {/* 모델 선택 — 키로 실제 사용 가능한 모델을 자동으로 불러와 선택 */}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <label className="flex items-center gap-1.5 text-xs text-slate-500">
                   모델
-                  <select value={GEMINI_MODELS.includes(model) ? model : "__custom__"}
+                  <select value={modelOptions.includes(model) ? model : "__custom__"}
                     onChange={(e) => { const v = e.target.value; setModel(v === "__custom__" ? "" : v); }}
                     className="w-56 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none">
-                    {GEMINI_MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+                    {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
                     <option value="__custom__">직접 입력…</option>
                   </select>
                 </label>
-                {!GEMINI_MODELS.includes(model) && (
+                {!modelOptions.includes(model) && (
                   <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="모델명 직접 입력 (예: gemini-2.5-flash)"
                     className="w-56 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none" />
                 )}
-                {model !== AI_CONFIG.gemini.model && (
-                  <button onClick={() => setModel(AI_CONFIG.gemini.model)} className="text-xs text-slate-400 hover:text-indigo-600">기본값({AI_CONFIG.gemini.model})</button>
+                <button onClick={() => loadModels(activeKey)} disabled={!keyConfigured || modelStatus === "loading"}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:border-indigo-400 disabled:opacity-50">
+                  {modelStatus === "loading" ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 사용 가능한 모델 불러오기
+                </button>
+                {modelStatus === "done" && availableModels.length > 0 && (
+                  <span className="text-[11px] text-emerald-600">✓ {availableModels.length}개 불러옴</span>
                 )}
-                <span className="text-[11px] text-slate-400">‘모델을 쓸 수 없다’는 404가 나면 목록에서 다른 모델로 바꿔 보세요.</span>
+                {modelStatus === "error" && <span className="text-[11px] text-red-500">{modelError.slice(0, 60)}</span>}
+                <span className="w-full text-[11px] text-slate-400">키를 넣으면 사용 가능한 모델을 자동으로 불러와 되는 모델로 맞춰줍니다. 404가 나면 ‘불러오기’를 눌러 다른 모델을 고르세요.</span>
               </div>
             </div>
           )}
