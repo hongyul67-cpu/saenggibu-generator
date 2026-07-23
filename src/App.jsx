@@ -40,17 +40,25 @@ async function fetchGeminiModels(apiKey) {
     .map((m) => (m.name || "").replace(/^models\//, ""))
     .filter((id) => id && !exclude.test(id));
 }
-// 목록에서 문장 생성에 가장 적합한(안정적인 flash) 모델을 자동 선택.
+// 모델 목록을 '최신·안정 flash 우선'으로 정렬(앞쪽일수록 권장). 생성 실패 시 이 순서로 폴백.
+function rankGeminiModels(list) {
+  const score = (m) => {
+    let s = 0;
+    if (/flash/i.test(m)) s -= 100;          // 세특 작성엔 flash가 빠르고 충분
+    else if (/pro/i.test(m)) s -= 40;
+    if (/lite/i.test(m)) s += 25;            // lite는 후순위
+    if (/preview|exp|thinking/i.test(m)) s += 40; // 실험/프리뷰 후순위
+    if (/latest/i.test(m)) s += 8;           // 별칭보다 구체 버전 우선
+    if (/1\.5|-8b/i.test(m)) s += 30;        // 구형 후순위
+    return s;
+  };
+  // 점수 낮을수록(권장) 앞, 동점이면 버전 높은 순
+  return [...new Set(list)].sort((a, b) => score(a) - score(b) || b.localeCompare(a, undefined, { numeric: true }));
+}
+// 현재 모델이 목록에 있으면 유지, 없으면 가장 권장(최신·안정 flash) 모델 선택.
 function preferGeminiModel(list, current) {
   if (current && list.includes(current)) return current;
-  const bad = /preview|exp|thinking|latest|lite|-8b|1\.5/i;
-  const byVerDesc = (a, b) => b.localeCompare(a, undefined, { numeric: true });
-  const stableFlash = list.filter((m) => /flash/i.test(m) && !bad.test(m)).sort(byVerDesc);
-  if (stableFlash.length) return stableFlash[0];
-  const anyFlash = list.filter((m) => /flash/i.test(m) && !/embedding/i.test(m)).sort(byVerDesc);
-  if (anyFlash.length) return anyFlash[0];
-  const anyPro = list.filter((m) => /pro/i.test(m) && !/preview|exp/i.test(m)).sort(byVerDesc);
-  return anyPro[0] || list[0] || "";
+  return rankGeminiModels(list)[0] || "";
 }
 
 async function callGemini(prompt, apiKey, model, maxTokens) {
@@ -75,7 +83,9 @@ async function callGemini(prompt, apiKey, model, maxTokens) {
   }
   if (!res.ok) {
     const t = await res.text().catch(() => "");
-    throw new Error(`API 오류 ${res.status} · ${t.slice(0, 160)}`);
+    const err = new Error(`API 오류 ${res.status} · ${t.slice(0, 160)}`);
+    err.status = res.status;
+    throw err;
   }
   const data = await res.json();
   const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text).filter(Boolean).join("");
@@ -88,10 +98,27 @@ const aiProviders = {
     callGemini(prompt, keyOverride || AI_CONFIG.gemini.apiKey, modelOverride || AI_CONFIG.gemini.model, maxTokens),
 };
 
-async function generateText(prompt, keyOverride, maxTokens, modelOverride) {
+// 생성. 선택 모델이 모델 문제(404/400/403)로 실패하면 fallbackModels 순서로 자동 폴백,
+// 되는 모델을 찾으면 onModelWorked로 알려 다음부터 그 모델을 쓰게 함.
+async function generateText(prompt, keyOverride, maxTokens, modelOverride, fallbackModels, onModelWorked) {
   const fn = aiProviders[AI_CONFIG.provider];
   if (!fn) throw new Error(`알 수 없는 provider: ${AI_CONFIG.provider}`);
-  return fn(prompt, keyOverride, maxTokens, modelOverride);
+  const primary = modelOverride || AI_CONFIG.gemini.model;
+  const candidates = [primary, ...(fallbackModels || [])].filter((m, i, a) => m && a.indexOf(m) === i);
+  let lastErr;
+  for (let i = 0; i < candidates.length && i < 5; i += 1) {
+    try {
+      const text = await fn(prompt, keyOverride, maxTokens, candidates[i]);
+      if (i > 0 && onModelWorked) onModelWorked(candidates[i]);
+      return text;
+    } catch (e) {
+      lastErr = e;
+      // 모델 자체 문제일 때만 다음 후보로. (빈 응답·안전필터 등은 다른 모델도 동일하므로 중단)
+      const modelIssue = e.status === 404 || e.status === 400 || e.status === 403;
+      if (!modelIssue) throw e;
+    }
+  }
+  throw lastErr;
 }
 
 /* ============================================================
@@ -169,14 +196,8 @@ function approxChars(byteLimit, byteMode) {
   return Math.floor(byteLimit / (byteMode === 3 ? 2.4 : 1.7));
 }
 // 결과가 제한을 넘으면 한도 이내에서 '마지막 완성 문장'까지만 남기고 잘라냄(넘긴 채로 저장되지 않도록).
-function trimToByteLimit(text, limit, mode) {
-  const t = (text || "").trim();
-  if (!limit || countBytes(t, mode) <= limit) return t;
-  // 한도 이하가 되는 최대 길이로 컷
-  let cut = t.length;
-  while (cut > 0 && countBytes(t.slice(0, cut), mode) > limit) cut -= 1;
-  const s = t.slice(0, cut);
-  // 마지막 문장 종결 지점 찾기: 마침표(.!?) 또는 명사형 종결(…음/함/임/됨/힘/봄/옴) + 공백/끝
+// 문장 종결(마침표 또는 명사형 종결 …음/함/임/됨/힘/봄/옴 + 공백/끝)의 마지막 위치+1 반환. 없으면 -1.
+function lastSentenceEndIndex(s) {
   const ENDERS = "음함임됨힘봄옴";
   let best = -1;
   for (let i = 0; i < s.length; i += 1) {
@@ -187,13 +208,32 @@ function trimToByteLimit(text, limit, mode) {
       if (next === undefined || next === " " || next === "." || next === "\n") best = i;
     }
   }
-  if (best >= 0) {
-    let out = s.slice(0, best + 1).trim();
-    // 종결부호 보정: 붙였을 때 한도를 넘지 않는 경우에만 '.' 추가
-    if (!/[.!?]$/.test(out) && countBytes(out, mode) + 1 <= limit) out += ".";
-    return out;
+  return best >= 0 ? best + 1 : -1;
+}
+function endsCleanly(t) {
+  return /[.!?]$/.test(t) || new RegExp("[음함임됨힘봄옴]$").test(t);
+}
+function trimToByteLimit(text, limit, mode) {
+  let t = (text || "").trim();
+  if (!t) return t;
+  // 1) 바이트 한도 초과 시, 한도 이내 최대 길이로 자르고 마지막 완성 문장까지 되돌림
+  if (limit && countBytes(t, mode) > limit) {
+    let cut = t.length;
+    while (cut > 0 && countBytes(t.slice(0, cut), mode) > limit) cut -= 1;
+    const s = t.slice(0, cut);
+    const b = lastSentenceEndIndex(s);
+    t = b > 0 ? s.slice(0, b) : s; // 경계 없으면 하드 컷(드묾)
   }
-  return s.trim(); // 문장 경계를 못 찾으면 하드 컷
+  // 2) 끝이 문장 종결이 아니면(모델 출력이 중간에 끊긴 경우) 마지막 완성 문장까지 정리
+  //    — 단, 잘라낸 뒤 내용이 남을 때만(전부 한 문장이면 그대로 둠)
+  if (!endsCleanly(t.trim())) {
+    const b = lastSentenceEndIndex(t);
+    if (b > 0) t = t.slice(0, b);
+  }
+  t = t.trim();
+  // 종결부호 보정: 붙여도 한도를 넘지 않으면 '.' 추가
+  if (t && !/[.!?]$/.test(t) && countBytes(t, mode) + 1 <= (limit || Infinity)) t += ".";
+  return t;
 }
 function joinList(arr, etc) {
   const all = [...(arr || [])];
@@ -352,7 +392,9 @@ function buildVariationPrompt({ text, byteLimit, byteMode, guidelines }) {
    ============================================================ */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const uid = () => Math.random().toString(36).slice(2, 9);
-const maxTokensFor = (byteLimit) => Math.min(8192, Math.max(1024, byteLimit));
+// 한국어는 바이트 대비 토큰이 많아, 한도와 같은 토큰만 주면 한도 근처에서 문장이 잘림.
+// 넉넉히(약 2배 + 여유) 주고, 실제 분량은 프롬프트 지시 + trimToByteLimit로 맞춘다.
+const maxTokensFor = (byteLimit) => Math.min(8192, Math.max(2048, Math.round(byteLimit * 2) + 512));
 
 const newBehaviorStudent = (name = "", number = "") => ({
   id: uid(), name, number, checks: [], customChecks: [], memo: "", result: "", status: "idle", error: null,
@@ -406,7 +448,7 @@ function CharLimitInput({ bytes, onBytes, byteMode, className, step = 50 }) {
       className={className} />
   );
 }
-function ByteGauge({ bytes, limit, byteMode = 3 }) {
+function ByteGauge({ bytes, limit, byteMode = 3, label }) {
   const pct = Math.min(100, limit ? (bytes / limit) * 100 : 0);
   const over = bytes > limit, near = !over && pct >= 80;
   const bar = over ? "bg-red-500" : near ? "bg-amber-500" : "bg-emerald-500";
@@ -416,9 +458,8 @@ function ByteGauge({ bytes, limit, byteMode = 3 }) {
       <div className="h-1.5 flex-1 rounded-full bg-slate-200 overflow-hidden">
         <div className={`h-full ${bar} transition-all duration-300`} style={{ width: `${pct}%` }} />
       </div>
-      <span className={`text-xs font-medium tabular-nums ${txt}`} title={`${bytes}/${limit}바이트`}>
-        {toChars(bytes, byteMode)}/{toChars(limit, byteMode)}자
-        <span className="ml-1 font-normal opacity-60">({bytes}/{limit}B)</span>
+      <span className={`text-xs font-medium tabular-nums ${txt}`} title={`${bytes}/${limit}바이트 (한글 1자 = ${byteMode}바이트)`}>
+        {toChars(bytes, byteMode)}/{toChars(limit, byteMode)}자{label ? <span className="ml-1 font-normal text-slate-400">· {label}</span> : null}
       </span>
     </div>
   );
@@ -624,7 +665,7 @@ function TeacherPerspective({ checks, etc, onChecks, onEtc }) {
 /* ============================================================
    행특 탭
    ============================================================ */
-function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model }) {
+function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model, fallbackModels, onModelResolved }) {
   const [track, setTrack] = useState("tech");
   const [grade, setGrade] = useState(1);
   const [byteLimit, setByteLimit] = useState(1500); // NEIS 행특 상한: 연간 500자(1,500B)
@@ -655,7 +696,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
       const checks = s.checks.filter((c) => valid.has(c));
       const teacher = joinList(teacherChecks, teacherEtc);
       const prompt = buildBehaviorPrompt({ track, grade, checks, customChecks: s.customChecks, memo: s.memo, byteLimit, byteMode, teacher, guidelines });
-      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(byteLimit), model);
+      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(byteLimit), model, fallbackModels, onModelResolved);
       patch(id, { result: trimToByteLimit(text, byteLimit, byteMode), status: "done" });
     } catch (e) { patch(id, { status: "error", error: e.message || "생성 실패" }); }
   };
@@ -829,7 +870,7 @@ function BehaviorTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
 /* ============================================================
    세특 탭
    ============================================================ */
-function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeachers, topicMode, topics, onChange, onRemove, onGenerate, onVary }) {
+function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeachers, topicMode, topics, onChange, onRemove, onGenerate, onVary, limitLabel }) {
   const bytes = countBytes(st.result, byteMode);
   const plain = !coTeaching && !topicMode;
   const loading = st.status === "loading";
@@ -932,7 +973,7 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
           <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
             <LimitedTextarea value={st.result} onChange={(v) => onChange({ result: v })} rows={4} placeholder="생성 결과 (직접 수정 가능)"
               limit={byteLimit} byteMode={byteMode} accent="teal" seed={st.id} />
-            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} byteMode={byteMode} /></div><CopyBtn text={st.result} /></div>
+            <div className="mt-2 flex items-center gap-3"><div className="flex-1"><ByteGauge bytes={bytes} limit={byteLimit} byteMode={byteMode} label={limitLabel} /></div><CopyBtn text={st.result} /></div>
           </div>
         )
       )}
@@ -940,7 +981,7 @@ function SubjectStudentRow({ st, idx, byteMode, byteLimit, coTeaching, coTeacher
   );
 }
 
-function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model }) {
+function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model, fallbackModels, onModelResolved }) {
   const [subjects, setSubjects] = useState([newSubject("과목 1")]);
   const [activeId, setActiveId] = useState(subjects[0].id);
   const [busyAll, setBusyAll] = useState(false);
@@ -1008,7 +1049,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
     patchStudent(sid, stid, { status: "loading", error: null });
     try {
       const prompt = buildSubjectPrompt({ subject: sub, student: st, byteMode, guidelines, byteLimit: lim });
-      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(lim), model);
+      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(lim), model, fallbackModels, onModelResolved);
       patchStudent(sid, stid, { result: trimToByteLimit(text, lim, byteMode), status: "done" });
     } catch (e) { patchStudent(sid, stid, { status: "error", error: e.message || "생성 실패" }); }
   };
@@ -1021,7 +1062,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
     patchStudent(sid, stid, { status: "loading", error: null });
     try {
       const prompt = buildVariationPrompt({ text: base, byteLimit: lim, byteMode, guidelines });
-      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(lim), model);
+      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(lim), model, fallbackModels, onModelResolved);
       patchStudent(sid, stid, { result: trimToByteLimit(text, lim, byteMode), status: "done" });
     } catch (e) { patchStudent(sid, stid, { status: "error", error: e.message || "생성 실패" }); }
   };
@@ -1288,6 +1329,7 @@ function SubjectTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model
           <SubjectStudentRow key={st.id} st={st} idx={i} byteMode={byteMode} byteLimit={subLimitFor(active, st)}
             coTeaching={active.coTeaching} coTeachers={active.coTeachers || []}
             topicMode={active.topicMode} topics={active.topics || []}
+            limitLabel={active.levelMode && !active.coTeaching && !active.topicMode ? `${st.level} 수준` : ""}
             onChange={(p) => patchStudent(active.id, st.id, p)} onRemove={() => removeStudent(st.id)}
             onGenerate={() => genStudent(active.id, st.id)} onVary={() => genVariation(active.id, st.id)} />
         ))}
@@ -1351,7 +1393,7 @@ function buildActivityPrompt({ area, meta, student, byteMode, guidelines, byteLi
   return L.join("\n");
 }
 
-function ActivityTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model }) {
+function ActivityTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, model, fallbackModels, onModelResolved }) {
   const [areas, setAreas] = useState(() => CA_AREAS.map(newActArea));
   const [activeKey, setActiveKey] = useState(CA_AREAS[0].key);
   const [busyAll, setBusyAll] = useState(false);
@@ -1379,7 +1421,7 @@ function ActivityTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
     patchStudent(key, stid, { status: "loading", error: null });
     try {
       const prompt = buildActivityPrompt({ area: def, meta: a, student: st, byteMode, guidelines, byteLimit: lim });
-      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(lim), model);
+      const text = await generateText(prompt, apiKeyOverride, maxTokensFor(lim), model, fallbackModels, onModelResolved);
       patchStudent(key, stid, { result: trimToByteLimit(text, lim, byteMode), status: "done" });
     } catch (e) { patchStudent(key, stid, { status: "error", error: e.message || "생성 실패" }); }
   };
@@ -1524,6 +1566,7 @@ function ActivityTab({ byteMode, apiKeyOverride, keyConfigured, guidelines, mode
         {active.students.map((st, i) => (
           <SubjectStudentRow key={st.id} st={st} idx={i} byteMode={byteMode} byteLimit={limFor(active, st)}
             coTeaching={false} coTeachers={[]} topicMode={false} topics={[]}
+            limitLabel={active.levelMode ? `${st.level} 수준` : ""}
             onChange={(p) => patchStudent(active.key, st.id, p)} onRemove={() => removeStudent(st.id)}
             onGenerate={() => genStudent(active.key, st.id)} onVary={() => {}} />
         ))}
@@ -1744,6 +1787,8 @@ export default function App() {
   }, [activeKey, keyConfigured]);
 
   const modelOptions = availableModels.length ? availableModels : GEMINI_MODELS;
+  // 생성 실패 시 폴백 순서(최신·안정 flash 우선). 불러온 목록이 있으면 그걸, 없으면 예비 목록.
+  const orderedModels = rankGeminiModels(availableModels.length ? availableModels : GEMINI_MODELS);
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800">
@@ -1897,13 +1942,13 @@ export default function App() {
 
         {/* 탭 본문 (둘 다 마운트 유지 → 전환해도 입력 보존) */}
         <div className={mainTab === "behavior" ? "" : "hidden"}>
-          <BehaviorTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} model={model} />
+          <BehaviorTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} model={model} fallbackModels={orderedModels} onModelResolved={setModel} />
         </div>
         <div className={mainTab === "subject" ? "" : "hidden"}>
-          <SubjectTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} model={model} />
+          <SubjectTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} model={model} fallbackModels={orderedModels} onModelResolved={setModel} />
         </div>
         <div className={mainTab === "creative" ? "" : "hidden"}>
-          <ActivityTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} model={model} />
+          <ActivityTab byteMode={byteMode} apiKeyOverride={apiKeyOverride} keyConfigured={keyConfigured} guidelines={activeGuidelines} model={model} fallbackModels={orderedModels} onModelResolved={setModel} />
         </div>
         <div className={mainTab === "minach" ? "" : "hidden"}>
           <MinAchievementTab />
