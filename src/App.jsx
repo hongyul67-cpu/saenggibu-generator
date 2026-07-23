@@ -55,19 +55,24 @@ function preferGeminiModel(list, current) {
 
 async function callGemini(prompt, apiKey, model, maxTokens) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const generationConfig = { temperature: 0.7, maxOutputTokens: maxTokens || 1024 };
-  // gemini-2.5/최신(latest) Flash 계열은 추론(thinking) 모델이라, 끄지 않으면 사고 과정이
-  // 본문에 섞이거나 토큰을 소진해 빈 응답이 나올 수 있음 → 비활성화.
-  // (thinking 미지원 모델엔 넣지 않도록 조건부 적용: 2.0/1.5 등 제외)
-  if (/2\.5|latest/.test(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig,
-    }),
-  });
+  const base = { temperature: 0.7, maxOutputTokens: maxTokens || 1024 };
+  // 2.5 flash 계열은 추론(thinking) 모델 → thinkingBudget:0으로 끔(사고 과정이 본문에 섞이거나
+  // 토큰 소진으로 빈 응답이 나오는 것 방지). pro/일부 모델은 budget 0을 거부(400)하므로 flash 한정.
+  const wantThinkOff = /2\.5/i.test(model) && /flash/i.test(model);
+  const send = async (withThinking) => {
+    const generationConfig = { ...base };
+    if (withThinking) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
+    });
+  };
+  let res = await send(wantThinkOff);
+  // 400(INVALID_ARGUMENT)이면 thinkingConfig가 원인일 수 있으니 그 설정 없이 한 번 더 시도
+  if (!res.ok && res.status === 400 && wantThinkOff) {
+    res = await send(false);
+  }
   if (!res.ok) {
     const t = await res.text().catch(() => "");
     throw new Error(`API 오류 ${res.status} · ${t.slice(0, 160)}`);
